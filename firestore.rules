@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Must match TEACHER_EMAIL in src/App.js
+    function isTeacher() {
+      return isSignedIn() && request.auth.token.email == 'bigladbrokes1@gmail.com';
+    }
+
+    // Question bank: students may read (the app fetches session questions
+    // client-side), but only the teacher can create/edit/delete.
+    match /questions/{questionId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // Sessions: students subscribe to the active session; only the teacher
+    // can start or end one.
+    match /sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // Results: students may only create results attributed to themselves.
+    // Results are immutable once written; only the teacher can read them.
+    match /results/{resultId} {
+      allow create: if isSignedIn()
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.studentEmail == request.auth.token.email;
+      allow read: if isTeacher();
+      allow update, delete: if false;
+    }
+
+    // Student profile + token balance. Students update their own balance as
+    // tokens are earned (same self-reporting trust model as results), but a
+    // non-teacher write must leave the doc's role as 'student' (docs created
+    // before roles existed have no role field and default to 'student').
+    match /students/{uid} {
+      allow read: if isTeacher() || (isSignedIn() && request.auth.uid == uid);
+      allow create, update: if isTeacher()
+        || (isSignedIn() && request.auth.uid == uid
+            && request.resource.data.get('role', 'student') == 'student');
+      allow delete: if false;
+    }
+
+    // Append-only token ledger. Students may only log their own earned
+    // question tokens; bonus and redemption entries come from the teacher.
+    match /tokenHistory/{entryId} {
+      allow create: if isTeacher()
+        || (isSignedIn()
+            && request.resource.data.studentId == request.auth.uid
+            && request.resource.data.type == "question");
+      allow read: if isTeacher()
+        || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    // Reward catalog: teacher manages it, students browse it.
+    match /rewards/{rewardId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // Redemption requests: students open pending requests for themselves;
+    // only the teacher resolves them (tokens are deducted at approval).
+    match /redemptionRequests/{requestId} {
+      allow create: if isSignedIn()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == "pending";
+      allow read: if isTeacher()
+        || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow update: if isTeacher();
+      allow delete: if false;
+    }
+
+    // Everything else (including the legacy "responses" collection) is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

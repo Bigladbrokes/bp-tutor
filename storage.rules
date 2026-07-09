@@ -1,0 +1,41 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Must match TEACHER_EMAIL in src/App.js
+    function isTeacher() {
+      return request.auth != null && request.auth.token.email == 'bigladbrokes1@gmail.com';
+    }
+
+    function isValidImage() {
+      return request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Question images and drawings: only the teacher can upload, and only
+    // images under 5 MB. Signed-in users can read (the app also embeds
+    // token-based download URLs, which work regardless of these rules).
+    match /question-images/{file} {
+      allow read: if request.auth != null;
+      allow create, update: if isTeacher() && isValidImage();
+      allow delete: if isTeacher();
+    }
+
+    match /drawings/{file} {
+      allow read: if request.auth != null;
+      allow create, update: if isTeacher() && isValidImage();
+      allow delete: if isTeacher();
+    }
+
+    match /rewards/{file} {
+      allow read: if request.auth != null;
+      allow create, update: if isTeacher() && isValidImage();
+      allow delete: if isTeacher();
+    }
+
+    // Everything else in the bucket is denied.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
