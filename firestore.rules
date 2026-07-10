@@ -23,6 +23,14 @@ service cloud.firestore {
     match /sessions/{sessionId} {
       allow read: if isSignedIn();
       allow write: if isTeacher();
+
+      // Join markers behind the teacher's live "X students joined" counter.
+      // A student may only write their own marker; only the teacher lists them.
+      match /joins/{uid} {
+        allow read: if isTeacher();
+        allow create, update: if isSignedIn() && request.auth.uid == uid;
+        allow delete: if false;
+      }
     }
 
     // Results: one row per (session, student, question, MC/blank/step/free

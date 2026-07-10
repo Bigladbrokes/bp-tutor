@@ -72,6 +72,8 @@ export default function LoginPage() {
         )}
 
         <p style={styles.note}>Use your school Google account to sign in.</p>
+
+        <a href="/join" style={styles.joinLink}>Have a session code? Enter it here</a>
       </div>
     </div>
   );
@@ -169,5 +171,11 @@ const styles = {
     marginTop: "24px",
     fontSize: "12px",
     color: "#999",
+  },
+  joinLink: {
+    display: "inline-block",
+    marginTop: "10px",
+    fontSize: "13px",
+    color: "#1565c0",
   },
 };

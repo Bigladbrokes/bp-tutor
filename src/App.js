@@ -1,17 +1,20 @@
 import React, { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./config/firebase";
 import { ensureUserDoc } from "./services/tokens";
 import LoginPage from "./pages/LoginPage";
 import TeacherPage from "./pages/TeacherPage";
 import StudentPage from "./pages/StudentPage";
+import JoinPage from "./pages/JoinPage";
+import SessionGate from "./components/SessionGate";
 
 // Bootstrap only: decides the role written to a brand-new /students doc on
 // first login, and must match isTeacher() in firestore.rules / storage.rules.
 // Routing itself follows the doc's role field, not this constant.
 const TEACHER_EMAIL = "bigladbrokes1@gmail.com";
 
-function App() {
+function useAuthRole() {
   const [user, setUser] = useState(undefined); // undefined = still loading
   const [role, setRole] = useState(null);      // null = profile not loaded yet
 
@@ -40,23 +43,61 @@ function App() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // Route immediately using the email check while the profile doc is still
+  // loading; the doc's role field takes over as soon as it arrives.
+  const effectiveRole = user
+    ? role ?? (user.email === TEACHER_EMAIL ? "teacher" : "student")
+    : null;
+
+  return { user, effectiveRole };
+}
+
+function App() {
+  const { user, effectiveRole } = useAuthRole();
+
   if (user === undefined) {
     return <LoadingScreen />;
   }
 
-  if (!user) {
-    return <LoginPage />;
-  }
+  // Signed-out users see the login on every route. The URL is left untouched,
+  // so a scanned /session/:id link resumes automatically after sign-in
+  // (popup sign-in never navigates; the redirect fallback returns here).
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            !user ? <LoginPage />
+            : effectiveRole === "teacher" ? <TeacherPage user={user} />
+            : <StudentPage user={user} />
+          }
+        />
+        <Route
+          path="/session/:sessionId"
+          element={
+            !user ? <LoginPage />
+            : effectiveRole === "teacher" ? <Navigate to="/" replace />
+            : <SessionGateRoute user={user} />
+          }
+        />
+        <Route
+          path="/join"
+          element={
+            !user ? <LoginPage />
+            : effectiveRole === "teacher" ? <Navigate to="/" replace />
+            : <JoinPage />
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
 
-  // Route immediately using the email check while the profile doc is still
-  // loading; the doc's role field takes over as soon as it arrives.
-  const effectiveRole = role ?? (user.email === TEACHER_EMAIL ? "teacher" : "student");
-
-  if (effectiveRole === "teacher") {
-    return <TeacherPage user={user} />;
-  }
-
-  return <StudentPage user={user} />;
+function SessionGateRoute({ user }) {
+  const { sessionId } = useParams();
+  return <SessionGate user={user} sessionId={sessionId} />;
 }
 
 function LoadingScreen() {

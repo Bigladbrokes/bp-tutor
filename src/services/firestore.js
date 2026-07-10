@@ -1,5 +1,5 @@
 import {
-  collection, addDoc, deleteDoc, doc, getDocs,
+  collection, addDoc, deleteDoc, doc, getDoc, getDocs, setDoc,
   query, orderBy, serverTimestamp, documentId,
   where, updateDoc, onSnapshot, writeBatch,
 } from "firebase/firestore";
@@ -35,13 +35,68 @@ export const migrateGrades = async () => {
 
 // --- Sessions ---
 
-export const startSession = (questionIds) =>
-  addDoc(collection(db, "sessions"), {
+// Join codes avoid characters students confuse on a projector: no 0/O, 1/I/L
+export const JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+export const generateJoinCode = (taken = new Set()) => {
+  let code;
+  do {
+    code = Array.from({ length: 6 }, () =>
+      JOIN_CODE_ALPHABET[Math.floor(Math.random() * JOIN_CODE_ALPHABET.length)]
+    ).join("");
+  } while (taken.has(code));
+  return code;
+};
+
+// Uppercase, drop spaces and anything outside the code alphabet, cap at 6
+export const normalizeJoinCode = (raw) =>
+  String(raw || "")
+    .toUpperCase()
+    .split("")
+    .filter((c) => JOIN_CODE_ALPHABET.includes(c))
+    .join("")
+    .slice(0, 6);
+
+export const startSession = async (questionIds) => {
+  // joinCode must be unique among ACTIVE sessions so /join is unambiguous
+  const active = await getDocs(query(collection(db, "sessions"), where("isActive", "==", true)));
+  const taken = new Set(active.docs.map((d) => d.data().joinCode).filter(Boolean));
+  return addDoc(collection(db, "sessions"), {
     questionIds,
+    joinCode: generateJoinCode(taken),
     isActive: true,
     startedAt: serverTimestamp(),
     endedAt: null,
   });
+};
+
+export const getSessionById = async (sessionId) => {
+  const snap = await getDoc(doc(db, "sessions", sessionId));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+};
+
+// Single-field equality query — auto-indexed, and permitted for any signed-in
+// user because the sessions read rule has no per-document conditions.
+export const findSessionByCode = async (code) => {
+  const snap = await getDocs(query(collection(db, "sessions"), where("joinCode", "==", code)));
+  const sessions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return (
+    sessions.find((s) => s.isActive) ??
+    sessions.sort((a, b) => (b.startedAt?.toMillis() ?? 0) - (a.startedAt?.toMillis() ?? 0))[0] ??
+    null
+  );
+};
+
+// Presence marker so the teacher's QR modal can count joined students
+export const markSessionJoin = (sessionId, user) =>
+  setDoc(doc(db, "sessions", sessionId, "joins", user.uid), {
+    studentName: user.displayName ?? "",
+    joinedAt: serverTimestamp(),
+  }, { merge: true });
+
+export const subscribeSessionJoins = (sessionId, callback) =>
+  onSnapshot(collection(db, "sessions", sessionId, "joins"), (snap) =>
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
 
 export const endSession = (sessionId) =>
   updateDoc(doc(db, "sessions", sessionId), {

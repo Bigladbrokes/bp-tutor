@@ -18,6 +18,7 @@ import LiveResults from "../components/LiveResults";
 import RewardsAdmin from "../components/RewardsAdmin";
 import StudentRankings from "../components/StudentRankings";
 import MetaBadges, { normalizeGrade } from "../components/MetaBadges";
+import SessionQRModal from "../components/SessionQRModal";
 import { subscribeAllRequests } from "../services/tokens";
 
 export default function TeacherPage({ user }) {
@@ -25,6 +26,7 @@ export default function TeacherPage({ user }) {
   const [activeSession, setActiveSession] = useState(undefined);
   const [results, setResults] = useState([]);
   const [tab, setTab] = useState("questions");
+  const [showQR, setShowQR] = useState(false);
   const [redemptionRequests, setRedemptionRequests] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState(null);
@@ -50,6 +52,7 @@ export default function TeacherPage({ user }) {
     if (!sessionId) {
       setResults([]);
       setTab("questions");
+      setShowQR(false);
       return;
     }
     setTab("results");
@@ -98,6 +101,7 @@ export default function TeacherPage({ user }) {
     if (selected.size === 0) return;
     await startSession([...selected]);
     setSelected(new Set());
+    setShowQR(true); // project the join QR as soon as the session begins
   };
 
   const handleEndSession = async () => {
@@ -129,7 +133,12 @@ export default function TeacherPage({ user }) {
         selected={selected}
         onStart={handleStartSession}
         onEnd={handleEndSession}
+        onShowQR={() => setShowQR(true)}
       />
+
+      {showQR && activeSession && (
+        <SessionQRModal session={activeSession} onClose={() => setShowQR(false)} />
+      )}
 
       <div style={s.main}>
         {/* Tabs */}
@@ -290,7 +299,7 @@ function Header({ user }) {
   );
 }
 
-function SessionBanner({ session, selected, onStart, onEnd }) {
+function SessionBanner({ session, selected, onStart, onEnd, onShowQR }) {
   if (session === undefined) return null;
 
   if (session) {
@@ -299,8 +308,12 @@ function SessionBanner({ session, selected, onStart, onEnd }) {
         <span>
           🟢 Session Active — {session.questionIds.length} question
           {session.questionIds.length !== 1 ? "s" : ""} sent to students
+          {session.joinCode && <span style={s.bannerCode}> · Code: {session.joinCode}</span>}
         </span>
-        <button onClick={onEnd} style={s.endBtn}>■ End Session</button>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button onClick={onShowQR} style={s.qrBtn}>▦ Show QR</button>
+          <button onClick={onEnd} style={s.endBtn}>■ End Session</button>
+        </div>
       </div>
     );
   }
@@ -464,6 +477,12 @@ const s = {
     padding: "7px 18px", background: "#b71c1c", color: "#fff",
     border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px", fontWeight: "600",
   },
+  qrBtn: {
+    padding: "7px 18px", background: "#fff", color: "#1b5e20",
+    border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px", fontWeight: "700",
+    whiteSpace: "nowrap",
+  },
+  bannerCode: { fontWeight: "700", letterSpacing: "2px" },
   main: { padding: "20px 32px 32px" },
   tabs: {
     display: "flex", gap: "4px", borderBottom: "2px solid #e0e0e0",

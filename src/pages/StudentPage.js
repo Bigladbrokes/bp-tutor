@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { logOut } from "../services/auth";
-import { subscribeActiveSession, getQuestionsByIds } from "../services/firestore";
+import { subscribeActiveSession, getQuestionsByIds, markSessionJoin } from "../services/firestore";
 import {
   tokensForResult, saveResultWithTokens,
   subscribeStudent, formatTokens,
@@ -46,6 +46,7 @@ export default function StudentPage({ user }) {
       });
       return;
     }
+    markSessionJoin(sessionId, user).catch(() => {}); // teacher's "joined" counter
     getQuestionsByIds(session.questionIds).then((qs) => {
       const ordered = session.questionIds.map((id) => qs.find((q) => q.id === id)).filter(Boolean);
       setQuestions(ordered);
@@ -113,7 +114,9 @@ export default function StudentPage({ user }) {
         <>
           {phase === "loading" && <CenteredMsg icon="⏳" text="Loading..." />}
           {phase === "waiting" && (
-            <CenteredMsg icon="📋" text="Waiting for your teacher to start a session..." sub="This page will update automatically." />
+            <CenteredMsg icon="📋" text="Waiting for your teacher to start a session..." sub="This page will update automatically.">
+              <a href="/join" style={s.joinLink}>Have a session code? Enter it here</a>
+            </CenteredMsg>
           )}
           {phase === "guided" && (
             <GuidedMode
@@ -829,12 +832,13 @@ function ModeBar({ label, current, total, color }) {
   );
 }
 
-function CenteredMsg({ icon, text, sub, iconColor = "#888" }) {
+function CenteredMsg({ icon, text, sub, iconColor = "#888", children }) {
   return (
     <div style={s.centered}>
       <div style={{ fontSize: 52, marginBottom: 12, color: iconColor }}>{icon}</div>
       <p style={s.centeredText}>{text}</p>
       {sub && <p style={s.centeredSub}>{sub}</p>}
+      {children && <div style={{ marginTop: 20 }}>{children}</div>}
     </div>
   );
 }
@@ -864,6 +868,7 @@ const s = {
   centered: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", textAlign: "center", padding: "24px" },
   centeredText: { fontSize: "20px", color: "#333", margin: "0 0 8px", fontWeight: "600" },
   centeredSub: { fontSize: "14px", color: "#888", margin: 0 },
+  joinLink: { color: "#1565c0", fontSize: "14px" },
 
   quizWrapper: { maxWidth: "640px", margin: "0 auto", padding: "24px 20px" },
   modeBar: { display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" },
