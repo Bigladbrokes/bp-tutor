@@ -6,7 +6,9 @@ import { getStorage } from "firebase/storage";
 // วาง Firebase config ที่ได้จาก Firebase Console > Project Settings > Your apps ตรงนี้
 const firebaseConfig = {
   apiKey: "AIzaSyBdTtNFMZvSCs_fjmuwwjdev2chjGLLvjA",
-  authDomain: "bp-tutor-3db94.firebaseapp.com",
+  // Same-origin as the deployed app (Firebase Hosting serves /__/auth/* here
+  // too). Keeps sign-in state first-party so iOS Safari / incognito work.
+  authDomain: "bp-tutor-3db94.web.app",
   projectId: "bp-tutor-3db94",
   storageBucket: "bp-tutor-3db94.firebasestorage.app",
   messagingSenderId: "870075604106",

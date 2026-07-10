@@ -1,9 +1,38 @@
-import React, { useState } from "react";
-import { signInWithGoogle } from "../services/auth";
+import React, { useEffect, useState } from "react";
+import { signInWithGoogle, consumeRedirectResult } from "../services/auth";
+
+const AUTH_ERROR_MESSAGES = {
+  "auth/popup-closed-by-user": "The sign-in window was closed before finishing. Please try again.",
+  "auth/cancelled-popup-request": "Another sign-in window was already open. Please try again.",
+  "auth/popup-blocked": "Your browser blocked the sign-in window. Allow pop-ups for this site, then try again.",
+  "auth/network-request-failed": "Network problem — check your internet connection and try again.",
+  "auth/unauthorized-domain": "This web address isn't authorized for sign-in. Please tell your teacher.",
+  "auth/operation-not-allowed": "Google sign-in is switched off for this app. Please tell your teacher.",
+  "auth/user-disabled": "This account has been disabled. Please tell your teacher.",
+  "auth/too-many-requests": "Too many attempts — wait a minute, then try again.",
+  "auth/missing-initial-state":
+    "The browser blocked sign-in storage (common in private browsing). Try again, or open this page in a normal tab.",
+  "auth/web-storage-unsupported":
+    "Your browser is blocking storage that sign-in needs. Turn off private browsing or enable cookies, then try again.",
+};
+
+const messageFor = (err) =>
+  AUTH_ERROR_MESSAGES[err?.code] ??
+  `Sign-in failed${err?.code ? ` (${err.code})` : ""}. Please try again.`;
 
 export default function LoginPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // If the popup was blocked and we fell back to a redirect, errors from that
+  // round trip surface here when the browser returns to the app.
+  useEffect(() => {
+    consumeRedirectResult().catch((err) => {
+      // Environments with no redirect support reject on mount — not a sign-in failure
+      if (err?.code === "auth/operation-not-supported-in-this-environment") return;
+      setError(messageFor(err));
+    });
+  }, []);
 
   const handleGoogleLogin = async () => {
     setError(null);
@@ -11,7 +40,8 @@ export default function LoginPage() {
     try {
       await signInWithGoogle();
     } catch (err) {
-      setError("Sign-in failed. Please try again.");
+      console.error("Sign-in failed:", err?.code, err?.message);
+      setError(messageFor(err));
     } finally {
       setLoading(false);
     }
@@ -32,7 +62,14 @@ export default function LoginPage() {
           {loading ? "Signing in..." : "Sign in with Google"}
         </button>
 
-        {error && <p style={styles.error}>{error}</p>}
+        {error && (
+          <div style={styles.errorBox} role="alert">
+            <p style={styles.errorText}>⚠️ {error}</p>
+            <button onClick={handleGoogleLogin} disabled={loading} style={styles.retryBtn}>
+              ↻ Try again
+            </button>
+          </div>
+        )}
 
         <p style={styles.note}>Use your school Google account to sign in.</p>
       </div>
@@ -103,10 +140,30 @@ const styles = {
     height: "20px",
     flexShrink: 0,
   },
-  error: {
+  errorBox: {
     marginTop: "16px",
-    color: "#d32f2f",
+    background: "#fdecea",
+    border: "1px solid #f5c6cb",
+    borderRadius: "8px",
+    padding: "12px 16px",
+    textAlign: "left",
+  },
+  errorText: {
+    margin: "0 0 10px",
+    color: "#c62828",
     fontSize: "14px",
+    lineHeight: "1.5",
+  },
+  retryBtn: {
+    width: "100%",
+    padding: "9px 0",
+    background: "#c62828",
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "600",
   },
   note: {
     marginTop: "24px",
