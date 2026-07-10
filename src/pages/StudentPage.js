@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { logOut } from "../services/auth";
-import { subscribeActiveSession, getQuestionsByIds, saveResult } from "../services/firestore";
+import { subscribeActiveSession, getQuestionsByIds } from "../services/firestore";
 import {
-  tokensForResult, awardQuestionTokens,
+  tokensForResult, saveResultWithTokens,
   subscribeStudent, formatTokens,
 } from "../services/tokens";
 import KaTeXRenderer from "../components/KaTeXRenderer";
@@ -74,13 +74,14 @@ export default function StudentPage({ user }) {
     studentEmail: user.email,
   });
 
-  // Save a single result immediately, then credit any tokens it earned
+  // Save a single result and credit any tokens it earned in one transaction.
+  // Row IDs are deterministic, so replaying a finished session (another
+  // browser, cleared storage) shows the quiz UI but never re-credits tokens.
   const persistResult = (r) => {
     const question = questions.find((q) => q.id === r.questionId);
     const difficulty = question?.difficulty || "Easy";
     const tokens = tokensForResult(difficulty, r.correct === true, r.attempts ?? 1);
-    return saveResult({ ...base(), ...r, tokensEarned: tokens })
-      .then(() => awardQuestionTokens(user, tokens, { questionId: r.questionId, difficulty }))
+    return saveResultWithTokens(user, { ...base(), ...r, tokensEarned: tokens }, tokens, { difficulty })
       .catch((err) => {
         console.error("Failed to save result:", err);
         alert("Your answer could not be saved — please check your internet connection.");

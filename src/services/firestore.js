@@ -63,8 +63,8 @@ export const getQuestionsByIds = async (ids) => {
   return snaps.flatMap((s) => s.docs.map((d) => ({ id: d.id, ...d.data() })));
 };
 
-export const saveResult = (data) =>
-  addDoc(collection(db, "results"), { ...data, timestamp: serverTimestamp() });
+// Result rows are written by saveResultWithTokens in services/tokens.js — one
+// transaction that stores the row and credits its tokens idempotently.
 
 export const subscribeResults = (sessionId, callback) => {
   const q = query(

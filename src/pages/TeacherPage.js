@@ -335,6 +335,11 @@ function QuestionCard({ question, selected, disabled, locked, expanded, onToggle
       />
       <div style={{ ...s.cardBody, cursor: "pointer" }} onClick={onToggleExpand}>
         <MetaBadges question={question} />
+        {(question.steps?.length ?? 0) > 0 && (
+          <span style={s.stepsChip} title="Students solve these steps in Independent Mode after Guided Mode">
+            🪜 {question.steps.length} solution step{question.steps.length !== 1 ? "s" : ""}
+          </span>
+        )}
         {!expanded ? (
           <p style={s.qTextCollapsed}>
             <KaTeXRenderer text={question.text} />
@@ -380,6 +385,19 @@ function QuestionCard({ question, selected, disabled, locked, expanded, onToggle
               </div>
             ) : (
               <span style={s.badge}>Short Answer</span>
+            )}
+
+            {(question.steps?.length ?? 0) > 0 && (
+              <div style={{ marginTop: "10px" }}>
+                <p style={s.stepsListLabel}>Solution steps — independent mode</p>
+                {question.steps.map((st, i) => (
+                  <p key={st.id || i} style={s.fitbAnswer}>
+                    <span style={{ color: "#6a1b9a", fontWeight: "700", marginRight: "6px" }}>{i + 1}.</span>
+                    <KaTeXRenderer text={st.instruction} />
+                    <span style={{ color: "#2e7d32", fontWeight: "600", marginLeft: "8px" }}>→ {st.correctAnswer}</span>
+                  </p>
+                ))}
+              </div>
             )}
           </>
         )}
@@ -522,4 +540,13 @@ const s = {
   migrateBtn: { padding: "5px 12px", background: "#f57f17", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap" },
 
   fitbAnswer: { margin: "6px 0 0", fontSize: "13px", color: "#555" },
+  stepsChip: {
+    display: "inline-block", fontSize: "11px", fontWeight: "700",
+    background: "#f3e5f5", color: "#6a1b9a", padding: "2px 8px",
+    borderRadius: "4px", marginBottom: "8px",
+  },
+  stepsListLabel: {
+    margin: "0 0 4px", fontSize: "11px", fontWeight: "700", color: "#6a1b9a",
+    textTransform: "uppercase", letterSpacing: "0.5px",
+  },
 };

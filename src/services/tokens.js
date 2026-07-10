@@ -65,28 +65,52 @@ export const subscribeStudents = (callback) =>
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((st) => st.role !== "teacher")));
 
-// Award earned tokens and write the ledger entry in one atomic batch
-export const awardQuestionTokens = (user, amount, meta) => {
-  if (!amount || amount <= 0) return Promise.resolve();
-  const batch = writeBatch(db);
-  batch.set(doc(db, "students", user.uid), {
-    tokenBalance: increment(amount),
-    studentName: user.displayName ?? "",
-    studentEmail: user.email ?? "",
-    photoURL: user.photoURL ?? "",
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  batch.set(doc(collection(db, "tokenHistory")), {
-    studentId: user.uid,
-    studentName: user.displayName ?? "",
-    amount,
-    type: "question",
-    questionId: meta.questionId ?? null,
-    difficulty: meta.difficulty ?? "Easy",
-    timestamp: serverTimestamp(),
-  });
-  return batch.commit();
+// ─── Result rows + token award (idempotent) ───────────────────────────────────
+
+// Deterministic result-row ID: one slot per (session, student, question, row),
+// where a "row" is the MC answer, one FitB blank, one solution step, or the
+// free-form independent answer. Segments are joined with "_" and none of the
+// parts contain "_" themselves — firestore.rules checks segment [1] is the
+// writer's uid.
+export const resultRowId = (result, uid) => {
+  const row = result.stepId ? `step-${result.stepId}`
+    : result.mode === "independent" ? "free"
+    : result.blankId != null ? `blank-${result.blankId}`
+    : "mc";
+  return `${result.sessionId}_${uid}_${result.questionId}_${row}`;
 };
+
+// Save one result row and credit its tokens in a single transaction. If the
+// row already exists — the student is replaying a finished session from
+// another browser, cleared storage, or a second tab — nothing is written and
+// no tokens are credited (results are create-only for students in the rules,
+// so even a race between two tabs cannot double-credit).
+export const saveResultWithTokens = (user, result, amount, meta = {}) =>
+  runTransaction(db, async (t) => {
+    const resultRef = doc(db, "results", resultRowId(result, user.uid));
+    const existing = await t.get(resultRef);
+    if (existing.exists()) return { duplicate: true };
+    t.set(resultRef, { ...result, timestamp: serverTimestamp() });
+    if (amount > 0) {
+      t.set(doc(db, "students", user.uid), {
+        tokenBalance: increment(amount),
+        studentName: user.displayName ?? "",
+        studentEmail: user.email ?? "",
+        photoURL: user.photoURL ?? "",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      t.set(doc(collection(db, "tokenHistory")), {
+        studentId: user.uid,
+        studentName: user.displayName ?? "",
+        amount,
+        type: "question",
+        questionId: result.questionId ?? null,
+        difficulty: meta.difficulty ?? "Easy",
+        timestamp: serverTimestamp(),
+      });
+    }
+    return { duplicate: false };
+  });
 
 export const giveBonusTokens = (student, amount, reason, teacherUid) => {
   const batch = writeBatch(db);

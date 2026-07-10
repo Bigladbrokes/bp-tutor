@@ -25,14 +25,24 @@ service cloud.firestore {
       allow write: if isTeacher();
     }
 
-    // Results: students may only create results attributed to themselves.
-    // Results are immutable once written; only the teacher can read them.
+    // Results: one row per (session, student, question, MC/blank/step/free
+    // answer), written under a deterministic ID together with the token award
+    // in a single transaction. Students may only create rows attributed to
+    // themselves, only in their own ID slot (segment [1] of the ID is the
+    // uid), and can never overwrite a row — so replaying a finished session
+    // cannot re-credit tokens. `get` on a student's own (possibly missing)
+    // row is allowed because the transaction's duplicate check needs it;
+    // listing results stays teacher-only.
     match /results/{resultId} {
+      allow get: if isTeacher()
+        || (isSignedIn() && resultId.split('_')[1] == request.auth.uid);
+      allow list: if isTeacher();
       allow create: if isSignedIn()
         && request.resource.data.studentUid == request.auth.uid
-        && request.resource.data.studentEmail == request.auth.token.email;
-      allow read: if isTeacher();
-      allow update, delete: if false;
+        && request.resource.data.studentEmail == request.auth.token.email
+        && resultId.split('_')[1] == request.auth.uid;
+      allow update: if isTeacher();
+      allow delete: if false;
     }
 
     // Student profile + token balance. Students update their own balance as

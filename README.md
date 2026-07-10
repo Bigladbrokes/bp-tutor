@@ -48,7 +48,7 @@ Session questions — including correct answers and hints — are downloaded to 
 |-------------|------------|----------|
 | `questions` | teacher    | text, type (`mc` / `fill_in_blank` / `sa`), options/blanks/steps, hint, image URL, grade/subject/difficulty |
 | `sessions`  | teacher    | `questionIds`, `isActive`, timestamps |
-| `results`   | students   | one row per resolved question/blank/step: mode, correctness, attempts, hint usage, the student's answer, `tokensEarned` |
+| `results`   | students   | one row per resolved question/blank/step: mode, correctness, attempts, hint usage, the student's answer, `tokensEarned`. Doc IDs are deterministic (`session_student_question_row`) and rows are create-only, so replaying a session never re-credits tokens |
 | `students`  | students + teacher | `studentName`, `studentEmail`, `photoURL`, `role` (`teacher` / `student`), `tokenBalance` (running total), `createdAt` |
 | `tokenHistory` | students + teacher | append-only ledger: `type` (`question` / `bonus` / `redemption`), signed `amount`, metadata |
 | `rewards`   | teacher    | reward catalog: name, image, `tokenCost`, optional `stock` (null = unlimited) |
