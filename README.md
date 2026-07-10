@@ -42,6 +42,8 @@ gsutil cors set cors.json gs://bp-tutor-3db94.firebasestorage.app
 
 Session questions — including correct answers and hints — are downloaded to the student's browser, and grading happens client-side. A student who opens browser DevTools can see the answers or forge a result's `correct` flag (rules prevent them from impersonating another student, but not from flattering themselves). This is an accepted trade-off for a small, supervised tutoring class; moving grading to Cloud Functions would be required to close it.
 
+What the rules *do* guarantee about tokens: each question slot (MC question / fill-in blank / solution step) pays out **at most once per session per student**. Question awards are written at a deterministic `tokenHistory` id (`{sessionId}_{uid}_{slot}`), the ledger forbids updates, and the balance increment is batched with the ledger write — so re-running a session from another device or after clearing localStorage saves new result rows but is denied the payout. Completion is also recorded in `completedSessions` on the student doc, so a finished session shows the done screen on every device.
+
 ## Data model (Firestore)
 
 | Collection  | Written by | Contents |
@@ -49,13 +51,13 @@ Session questions — including correct answers and hints — are downloaded to 
 | `questions` | teacher    | text, type (`mc` / `fill_in_blank` / `sa`), options/blanks/steps, hint, image URL, grade/subject/difficulty |
 | `sessions`  | teacher    | `questionIds`, `isActive`, timestamps |
 | `results`   | students   | one row per resolved question/blank/step: mode, correctness, attempts, hint usage, the student's answer, `tokensEarned` |
-| `students`  | students + teacher | `studentName`, `studentEmail`, `photoURL`, `role` (`teacher` / `student`), `tokenBalance` (running total), `createdAt` |
-| `tokenHistory` | students + teacher | append-only ledger: `type` (`question` / `bonus` / `redemption`), signed `amount`, metadata |
+| `students`  | students + teacher | `studentName`, `studentEmail`, `photoURL`, `role` (`teacher` / `student`), `tokenBalance` (running total), `completedSessions` (map of finished session ids), `createdAt` |
+| `tokenHistory` | students + teacher | append-only ledger: `type` (`question` / `bonus` / `redemption`), signed `amount`, metadata; `question` entries use id `{sessionId}_{uid}_{slot}` so each slot pays once |
 | `rewards`   | teacher    | reward catalog: name, image, `tokenCost`, optional `stock` (null = unlimited) |
 | `redemptionRequests` | students + teacher | student redemption requests; `status` `pending` → `approved` / `rejected` |
 
 ### Token rewards
 
-Correct answers earn tokens by question difficulty — Easy 1, Medium 5, Hard 10 — halved when the second attempt was needed, per result row (each MC question, fill-in blank, or solution step). Tokens are deducted **only when the teacher approves** a redemption request (approval runs in a transaction that re-checks balance and stock), so rejections need no refunds.
+Correct answers earn tokens by question difficulty — Easy 1, Medium 5, Hard 10 — halved when the second attempt was needed, per result row (each MC question, fill-in blank, or solution step). Each row pays at most once per session (see the security-rules section), so refreshing, clearing storage, or re-answering from a second device can't inflate a balance. Tokens are deducted **only when the teacher approves** a redemption request (approval runs in a transaction that re-checks balance and stock), so rejections need no refunds.
 
 Older question documents may use `type` only (newer ones also carry `questionType`) and numeric grades `7/8/9`; the app reads both forms, and the teacher dashboard offers a one-click grade-label migration when old labels are detected.

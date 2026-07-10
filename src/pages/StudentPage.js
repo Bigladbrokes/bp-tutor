@@ -3,7 +3,7 @@ import { logOut } from "../services/auth";
 import { subscribeActiveSession, getQuestionsByIds, saveResult } from "../services/firestore";
 import {
   tokensForResult, awardQuestionTokens,
-  subscribeStudent, formatTokens,
+  subscribeStudent, formatTokens, markSessionCompleted,
 } from "../services/tokens";
 import KaTeXRenderer from "../components/KaTeXRenderer";
 import MetaBadges from "../components/MetaBadges";
@@ -59,10 +59,26 @@ export default function StudentPage({ user }) {
     });
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist completion so a refresh shows the "done" screen instead of restarting
+  // Persist completion so a refresh shows the "done" screen instead of
+  // restarting — locally for instant reads, and on the student doc so other
+  // browsers/devices see it too.
   useEffect(() => {
-    if (phase === "done" && sessionId) markDone(sessionId);
-  }, [phase, sessionId]);
+    if (phase === "done" && sessionId) {
+      markDone(sessionId);
+      markSessionCompleted(user.uid, sessionId)
+        .catch((err) => console.error("Failed to record session completion:", err));
+    }
+  }, [phase, sessionId, user]);
+
+  // Already completed under this account — on another device, or before this
+  // browser's storage was cleared — so show the done screen instead of
+  // letting the quiz rerun (a rerun writes duplicate result rows).
+  const completedRemotely = !!(sessionId && studentDoc?.completedSessions?.[sessionId]);
+  useEffect(() => {
+    if (completedRemotely && (phase === "guided" || phase === "independent")) {
+      setPhase("done");
+    }
+  }, [completedRemotely, phase]);
 
   const guidedQuestions = questions.filter((q) => getQType(q) === "mc" || isFitB(q));
   const independentQuestions = questions.filter(isIndependent);
@@ -74,13 +90,31 @@ export default function StudentPage({ user }) {
     studentEmail: user.email,
   });
 
-  // Save a single result immediately, then credit any tokens it earned
+  // Save a single result immediately, then credit any tokens it earned.
+  // Each question/blank/step pays at most once per session: a duplicate award
+  // is rejected by the security rules (see awardQuestionTokens), which is the
+  // expected outcome when a finished session is re-answered — the result row
+  // still saves, only the payout is skipped.
   const persistResult = (r) => {
     const question = questions.find((q) => q.id === r.questionId);
     const difficulty = question?.difficulty || "Easy";
     const tokens = tokensForResult(difficulty, r.correct === true, r.attempts ?? 1);
     return saveResult({ ...base(), ...r, tokensEarned: tokens })
-      .then(() => awardQuestionTokens(user, tokens, { questionId: r.questionId, difficulty }))
+      .then(() =>
+        awardQuestionTokens(user, tokens, {
+          sessionId: session?.id,
+          questionId: r.questionId,
+          blankId: r.blankId,
+          stepId: r.stepId,
+          difficulty,
+        }).catch((err) => {
+          if (err?.code === "permission-denied") {
+            console.info("Tokens for this answer were already awarded — not paying twice.");
+          } else {
+            console.error("Failed to award tokens:", err);
+          }
+        })
+      )
       .catch((err) => {
         console.error("Failed to save result:", err);
         alert("Your answer could not be saved — please check your internet connection.");

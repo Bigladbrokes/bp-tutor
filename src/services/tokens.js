@@ -52,6 +52,14 @@ export const ensureUserDoc = async (user, role) => {
 export const updateStudentGrade = (uid, grade) =>
   setDoc(doc(db, "students", uid), { grade: grade || null }, { merge: true });
 
+// Record "finished this session" on the student's own doc, so clearing
+// localStorage or switching devices shows the done screen instead of
+// restarting the quiz (StudentPage keeps localStorage as the fast path).
+export const markSessionCompleted = (uid, sessionId) =>
+  setDoc(doc(db, "students", uid), {
+    completedSessions: { [sessionId]: true },
+  }, { merge: true });
+
 export const subscribeStudent = (uid, callback) =>
   onSnapshot(doc(db, "students", uid), (snap) =>
     callback(snap.exists() ? snap.data() : null));
@@ -65,9 +73,21 @@ export const subscribeStudents = (callback) =>
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((st) => st.role !== "teacher")));
 
-// Award earned tokens and write the ledger entry in one atomic batch
+// One award "slot" per result row: an MC question, a FitB blank, or a
+// solution step. Blank/step ids only need to be unique within their question.
+export const questionAwardSlot = ({ questionId, blankId, stepId }) =>
+  blankId != null ? `${questionId}_b${blankId}`
+    : stepId != null ? `${questionId}_s${stepId}`
+    : String(questionId);
+
+// Award earned tokens and write the ledger entry in one atomic batch.
+// The ledger doc id is deterministic per (session, student, slot) and
+// tokenHistory forbids updates, so re-answering the same slot — from another
+// device, or after clearing localStorage — rejects the whole batch instead
+// of paying twice. Balance and ledger can therefore never drift apart.
 export const awardQuestionTokens = (user, amount, meta) => {
   if (!amount || amount <= 0) return Promise.resolve();
+  const slot = questionAwardSlot(meta);
   const batch = writeBatch(db);
   batch.set(doc(db, "students", user.uid), {
     tokenBalance: increment(amount),
@@ -76,12 +96,14 @@ export const awardQuestionTokens = (user, amount, meta) => {
     photoURL: user.photoURL ?? "",
     updatedAt: serverTimestamp(),
   }, { merge: true });
-  batch.set(doc(collection(db, "tokenHistory")), {
+  batch.set(doc(db, "tokenHistory", `${meta.sessionId}_${user.uid}_${slot}`), {
     studentId: user.uid,
     studentName: user.displayName ?? "",
     amount,
     type: "question",
+    sessionId: meta.sessionId,
     questionId: meta.questionId ?? null,
+    slot,
     difficulty: meta.difficulty ?? "Easy",
     timestamp: serverTimestamp(),
   });

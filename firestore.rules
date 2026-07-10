@@ -49,11 +49,20 @@ service cloud.firestore {
 
     // Append-only token ledger. Students may only log their own earned
     // question tokens; bonus and redemption entries come from the teacher.
+    // A question entry must sit at its deterministic id — sessionId_uid_slot,
+    // one slot per MC question / FitB blank / solution step — so with the
+    // no-update rule below each slot pays out at most once per session:
+    // re-answering from another device or after clearing localStorage becomes
+    // a denied update, which also aborts the batched balance increment.
+    // (The embedded uid keeps students from claiming each other's slot ids.)
     match /tokenHistory/{entryId} {
       allow create: if isTeacher()
         || (isSignedIn()
             && request.resource.data.studentId == request.auth.uid
-            && request.resource.data.type == "question");
+            && request.resource.data.type == "question"
+            && request.resource.data.sessionId is string
+            && request.resource.data.slot is string
+            && entryId == request.resource.data.sessionId + '_' + request.auth.uid + '_' + request.resource.data.slot);
       allow read: if isTeacher()
         || (isSignedIn() && resource.data.studentId == request.auth.uid);
       allow update, delete: if false;
