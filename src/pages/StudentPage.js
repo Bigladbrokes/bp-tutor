@@ -3,7 +3,7 @@ import { logOut } from "../services/auth";
 import { subscribeActiveSession, getQuestionsByIds } from "../services/firestore";
 import {
   tokensForResult, saveResultWithTokens,
-  subscribeStudent, formatTokens,
+  subscribeStudent, formatTokens, markSessionCompleted,
 } from "../services/tokens";
 import KaTeXRenderer from "../components/KaTeXRenderer";
 import MetaBadges from "../components/MetaBadges";
@@ -59,10 +59,27 @@ export default function StudentPage({ user }) {
     });
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist completion so a refresh shows the "done" screen instead of restarting
+  // Persist completion so a refresh shows the "done" screen instead of
+  // restarting — locally for instant reads, and on the student doc so other
+  // browsers/devices see it too.
   useEffect(() => {
-    if (phase === "done" && sessionId) markDone(sessionId);
-  }, [phase, sessionId]);
+    if (phase === "done" && sessionId) {
+      markDone(sessionId);
+      markSessionCompleted(user.uid, sessionId)
+        .catch((err) => console.error("Failed to record session completion:", err));
+    }
+  }, [phase, sessionId, user]);
+
+  // Already completed under this account — on another device, or before this
+  // browser's storage was cleared — so show the done screen instead of
+  // letting the quiz rerun (a rerun saves no rows and pays nothing, wasting
+  // the student's effort).
+  const completedRemotely = !!(sessionId && studentDoc?.completedSessions?.[sessionId]);
+  useEffect(() => {
+    if (completedRemotely && (phase === "guided" || phase === "independent")) {
+      setPhase("done");
+    }
+  }, [completedRemotely, phase]);
 
   const guidedQuestions = questions.filter((q) => getQType(q) === "mc" || isFitB(q));
   const independentQuestions = questions.filter(isIndependent);
@@ -75,8 +92,9 @@ export default function StudentPage({ user }) {
   });
 
   // Save a single result and credit any tokens it earned in one transaction.
-  // Row IDs are deterministic, so replaying a finished session (another
-  // browser, cleared storage) shows the quiz UI but never re-credits tokens.
+  // Row IDs are deterministic, so even if a finished session briefly reruns
+  // (answers submitted before the completedSessions flag arrives), nothing
+  // is overwritten and tokens are never re-credited.
   const persistResult = (r) => {
     const question = questions.find((q) => q.id === r.questionId);
     const difficulty = question?.difficulty || "Easy";

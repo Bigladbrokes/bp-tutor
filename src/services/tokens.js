@@ -52,6 +52,14 @@ export const ensureUserDoc = async (user, role) => {
 export const updateStudentGrade = (uid, grade) =>
   setDoc(doc(db, "students", uid), { grade: grade || null }, { merge: true });
 
+// Record "finished this session" on the student's own doc, so clearing
+// localStorage or switching devices shows the done screen instead of
+// restarting the quiz (StudentPage keeps localStorage as the fast path).
+export const markSessionCompleted = (uid, sessionId) =>
+  setDoc(doc(db, "students", uid), {
+    completedSessions: { [sessionId]: true },
+  }, { merge: true });
+
 export const subscribeStudent = (uid, callback) =>
   onSnapshot(doc(db, "students", uid), (snap) =>
     callback(snap.exists() ? snap.data() : null));
