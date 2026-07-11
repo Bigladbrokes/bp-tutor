@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { logOut } from "../services/auth";
 import { subscribeActiveSession, getQuestionsByIds, markSessionJoin } from "../services/firestore";
+import { shuffledOptions } from "../services/shuffle";
 import {
   tokensForResult, saveResultWithTokens,
   subscribeStudent, formatTokens,
@@ -122,6 +123,7 @@ export default function StudentPage({ user }) {
             <GuidedMode
               guidedQuestions={guidedQuestions}
               hasIndependent={independentQuestions.length > 0}
+              studentUid={user.uid}
               onSaveResult={persistResult}
               onComplete={handleGuidedComplete}
             />
@@ -147,7 +149,7 @@ export default function StudentPage({ user }) {
 
 // ─── Guided Mode (MC with retry + hint) ──────────────────────────────────────
 
-function GuidedMode({ guidedQuestions, hasIndependent, onSaveResult, onComplete }) {
+function GuidedMode({ guidedQuestions, hasIndependent, studentUid, onSaveResult, onComplete }) {
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState([]);
   const [showSummary, setShowSummary] = useState(false);
@@ -186,28 +188,70 @@ function GuidedMode({ guidedQuestions, hasIndependent, onSaveResult, onComplete 
       <ModeBar label="Guided Mode" current={idx + 1} total={guidedQuestions.length} color="#0f3460" />
       {isFitB(current)
         ? <FitBQuestion key={current.id} question={current} onResult={handleResult} onNext={handleNext} />
-        : <GuidedQuestion key={current.id} question={current} onResult={handleResult} onNext={handleNext} />
+        : <GuidedQuestion key={current.id} question={current} studentUid={studentUid} onResult={handleResult} onNext={handleNext} />
       }
     </div>
   );
 }
 
-function GuidedQuestion({ question, onResult, onNext }) {
-  const [selected, setSelected] = useState(null);
+// ─── Answer timing ────────────────────────────────────────────────────────────
+// Both ends come from the same device clock, so durations are immune to a
+// wrong phone clock; the row's server `timestamp` stays the wall-clock anchor.
+//   timeToFirstCheckMs — shown → first Check press (headline thinking time,
+//                        uncontaminated by hint reading)
+//   timeToResolveMs    — shown → final resolution (includes any retry)
+// Values are kept raw here; outliers are filtered at the dashboard layer.
+function useAnswerTiming() {
+  const shownAtRef = useRef(Date.now());
+  const firstCheckMsRef = useRef(null);
+
+  const markCheck = () => {
+    if (firstCheckMsRef.current == null) {
+      firstCheckMsRef.current = Date.now() - shownAtRef.current;
+    }
+  };
+
+  const timing = () => ({
+    shownAtMs: shownAtRef.current,
+    timeToFirstCheckMs: firstCheckMsRef.current ?? (Date.now() - shownAtRef.current),
+    timeToResolveMs: Date.now() - shownAtRef.current,
+  });
+
+  // For components that show several items in sequence (step advance)
+  const reset = () => {
+    shownAtRef.current = Date.now();
+    firstCheckMsRef.current = null;
+  };
+
+  return { markCheck, timing, reset };
+}
+
+function GuidedQuestion({ question, studentUid, onResult, onNext }) {
+  const [selected, setSelected] = useState(null); // ORIGINAL option index, as a string
   const [attempt, setAttempt] = useState(1);
   const [status, setStatus] = useState("answering");
   const saved = useRef(false);
+  const { markCheck, timing } = useAnswerTiming();
+
+  // Per-student display order. Deterministic in (studentUid, questionId), so
+  // it never changes across renders or the retry — only the DISPLAY shuffles;
+  // selection, grading, and stored rows all stay in original-index space.
+  const options = useMemo(() => shuffledOptions(question, studentUid), [question, studentUid]);
+  // The correct option's letter as THIS student sees it (for the reveal text)
+  const correctDisplayIndex = options.findIndex((o) => String(o.originalIndex) === question.correctAnswer);
 
   const check = () => {
     if (!selected) return;
+    markCheck();
     const ok = selected === question.correctAnswer;
+    const answerText = question.options[+selected] ?? "";
     if (ok) {
-      if (!saved.current) { onResult({ questionId: question.id, mode: "guided", correct: true, usedHint: attempt === 2, attempts: attempt, answer: selected }); saved.current = true; }
+      if (!saved.current) { onResult({ questionId: question.id, mode: "guided", correct: true, usedHint: attempt === 2, attempts: attempt, answer: selected, answerText, ...timing() }); saved.current = true; }
       setStatus("correct");
     } else if (attempt === 1) {
       setStatus("wrong");
     } else {
-      if (!saved.current) { onResult({ questionId: question.id, mode: "guided", correct: false, usedHint: true, attempts: 2, answer: selected }); saved.current = true; }
+      if (!saved.current) { onResult({ questionId: question.id, mode: "guided", correct: false, usedHint: true, attempts: 2, answer: selected, answerText, ...timing() }); saved.current = true; }
       setStatus("revealed");
     }
   };
@@ -223,18 +267,18 @@ function GuidedQuestion({ question, onResult, onNext }) {
       {question.imageUrl && <img src={question.imageUrl} alt="" style={s.questionImg} />}
       {status === "correct"  && <Feedback type="correct" tokens={tokensForResult(question.difficulty || "Easy", true, attempt)} />}
       {status === "wrong"    && <Feedback type="wrong" />}
-      {status === "revealed" && <Feedback type="revealed" text={<><strong>{String.fromCharCode(65 + +question.correctAnswer)}.</strong> <KaTeXRenderer text={question.options[+question.correctAnswer]} /></>} />}
+      {status === "revealed" && <Feedback type="revealed" text={<><strong>{String.fromCharCode(65 + Math.max(0, correctDisplayIndex))}.</strong> <KaTeXRenderer text={question.options[+question.correctAnswer]} /></>} />}
       {showHint && <Hint text={question.hint} />}
       {!isResolved && (
         <div style={s.optionList}>
-          {question.options.map((opt, i) => {
-            const sel = selected === String(i);
+          {options.map(({ text, originalIndex }, displayIndex) => {
+            const sel = selected === String(originalIndex);
             return (
-              <div key={i} onClick={() => status === "answering" && setSelected(String(i))}
+              <div key={originalIndex} onClick={() => status === "answering" && setSelected(String(originalIndex))}
                 style={{ ...s.optionCard, borderColor: sel ? "#0f3460" : "#e0e0e0", background: sel ? "#eef1f8" : "#fff", cursor: status === "answering" ? "pointer" : "default" }}>
                 <span style={{ ...s.optDot, borderColor: sel ? "#0f3460" : "#bbb", background: sel ? "#0f3460" : "transparent" }} />
-                <span style={s.optLetter}>{String.fromCharCode(65 + i)}.</span>
-                <KaTeXRenderer text={opt} />
+                <span style={s.optLetter}>{String.fromCharCode(65 + displayIndex)}.</span>
+                <KaTeXRenderer text={text} />
               </div>
             );
           })}
@@ -268,6 +312,9 @@ function FitBQuestion({ question, onResult, onNext }) {
   const [phase, setPhase] = useState("answering"); // "answering" | "retry" | "done"
   const [earnedTokens, setEarnedTokens] = useState(0);
   const saved = useRef(false);
+  // One shown moment for the whole question: blanks are checked and resolved
+  // together, so every blank row of this question shares the same timing.
+  const { markCheck, timing } = useAnswerTiming();
 
   const normalize = (v) => v.trim().toLowerCase().replace(/\s+/g, " ");
   const matchesOne = (val, expected) => {
@@ -289,6 +336,7 @@ function FitBQuestion({ question, onResult, onNext }) {
   };
 
   const check = () => {
+    markCheck();
     const prevStatus = status;
     const nextStatus = [...prevStatus];
     blanks.forEach((blank, idx) => {
@@ -306,6 +354,7 @@ function FitBQuestion({ question, onResult, onNext }) {
       if (!saved.current) {
         saved.current = true;
         let earned = 0;
+        const t = timing();
         blanks.forEach((blank, idx) => {
           const isCorrect = nextStatus[idx] === "correct";
           const thisAttempt = prevStatus[idx] === "correct" ? 1 : attempt;
@@ -317,6 +366,7 @@ function FitBQuestion({ question, onResult, onNext }) {
             correct: isCorrect,
             usedHint: thisAttempt === 2,
             attempts: thisAttempt,
+            ...t,
             answer: answers[idx] || "",
           });
         });
@@ -549,16 +599,18 @@ function QuestionStepper({ question, onDone, onSaveStep }) {
   const [status, setStatus]     = useState("answering");
   const [stepResults, setStepResults] = useState([]);
   const inputRef = useRef(null);
+  const { markCheck, timing, reset } = useAnswerTiming();
 
   const currentStep = steps[stepIdx];
 
   const check = () => {
     if (!input.trim()) return;
+    markCheck();
     const ok = matchStep(input, currentStep);
 
     if (ok) {
       const r = { questionId: question.id, stepId: currentStep.id, stepOrder: stepIdx + 1,
-        mode: "independent", correct: true, usedHint: attempt === 2, attempts: attempt, studentAnswer: input.trim() };
+        mode: "independent", correct: true, usedHint: attempt === 2, attempts: attempt, studentAnswer: input.trim(), ...timing() };
       onSaveStep(r);
       setStepResults(prev => [...prev, r]);
       setStatus("correct");
@@ -567,7 +619,7 @@ function QuestionStepper({ question, onDone, onSaveStep }) {
       setStatus("wrong");
     } else {
       const r = { questionId: question.id, stepId: currentStep.id, stepOrder: stepIdx + 1,
-        mode: "independent", correct: false, usedHint: true, attempts: 2, studentAnswer: input.trim() };
+        mode: "independent", correct: false, usedHint: true, attempts: 2, studentAnswer: input.trim(), ...timing() };
       onSaveStep(r);
       setStepResults(prev => [...prev, r]);
       setStatus("revealed");
@@ -583,6 +635,7 @@ function QuestionStepper({ question, onDone, onSaveStep }) {
       setInput("");
       setAttempt(1);
       setStatus("answering");
+      reset(); // the next step is shown now — restart its timing clock
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   };
@@ -664,10 +717,13 @@ function QuestionStepper({ question, onDone, onSaveStep }) {
 
 function SimpleAnswer({ question, onDone, onSave }) {
   const [input, setInput] = useState("");
+  // Free-form has a single submit: first check and resolution coincide
+  const { markCheck, timing } = useAnswerTiming();
 
   const submit = () => {
     if (!input.trim()) return;
-    const r = { questionId: question.id, stepId: null, mode: "independent", correct: null, usedHint: false, attempts: 1, answer: input.trim() };
+    markCheck();
+    const r = { questionId: question.id, stepId: null, mode: "independent", correct: null, usedHint: false, attempts: 1, answer: input.trim(), ...timing() };
     onSave(r);
     onDone([r]);
   };
