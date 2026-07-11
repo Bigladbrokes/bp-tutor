@@ -1,7 +1,9 @@
 import React from "react";
 
-const GRADE_MAP = { "7": "M.1", "8": "M.2", "9": "M.3" };
-export const normalizeGrade = (g) => GRADE_MAP[g] || g || "M.1";
+import { normalizeGrade, normalizeChapter } from "../services/chapters";
+
+// Re-export so existing `import { normalizeGrade } from "./MetaBadges"` keeps working
+export { normalizeGrade };
 
 const DIFF_BADGE = {
   Easy:   { background: "#e8f5e9", color: "#2e7d32" },
@@ -17,11 +19,13 @@ const s = {
   fitbBadge:    { background: "#f3e5f5", color: "#6a1b9a" },
 };
 
-export default function MetaBadges({ question, size = "sm" }) {
+// chapterBadge is opt-in (teacher views only) so student-facing cards are unchanged
+export default function MetaBadges({ question, size = "sm", chapterBadge = false }) {
   const grade      = normalizeGrade(question.grade);
   const subject    = question.subject    || "Science";
   const difficulty = question.difficulty || "Easy";
   const qType      = question.questionType || question.type || "mc";
+  const chapter    = normalizeChapter(question.chapter);
   const fs  = size === "sm" ? "11px" : "12px";
   const pad = size === "sm" ? "2px 8px" : "3px 10px";
   return (
@@ -38,6 +42,14 @@ export default function MetaBadges({ question, size = "sm" }) {
       <span style={{ ...s.badge, fontSize: fs, padding: pad, ...DIFF_BADGE[difficulty] }}>
         {difficulty}
       </span>
+      {chapterBadge && (
+        <span style={{
+          ...s.badge, fontSize: fs, padding: pad,
+          ...(chapter ? { background: "#ede7f6", color: "#4527a0" } : { background: "#f5f5f5", color: "#9e9e9e" }),
+        }}>
+          📚 {chapter || "Uncategorized"}
+        </span>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import KaTeXRenderer from "./KaTeXRenderer";
 import DrawingTool from "./DrawingTool";
 import { deleteQuestionImage } from "../services/storageService";
+import { normalizeChapter, chaptersFor } from "../services/chapters";
 
 const GRADES       = ["M.1", "M.2", "M.3"];
 const SUBJECTS     = ["Math", "Science"];
@@ -28,6 +29,7 @@ const toFormState = (data) => ({
   grade:         data?.grade       || "M.1",
   subject:       data?.subject     || "Science",
   difficulty:    data?.difficulty  || "Easy",
+  chapter:       data?.chapter     || "",
   // blanks: migrate old single-answer FitB format to array
   blanks: data?.blanks ||
     (data?.type === "fill_in_blank" && data?.correctAnswer
@@ -35,11 +37,19 @@ const toFormState = (data) => ({
       : [{ id: 1, answer: "", hint: "" }]),
 });
 
-export default function QuestionForm({ onSave, onClose, initialData }) {
+export default function QuestionForm({ onSave, onClose, initialData, questions = [] }) {
   const isEdit = !!initialData;
   const [form, setForm] = useState(() => toFormState(initialData));
   const [saving, setSaving] = useState(false);
   const [showDrawing, setShowDrawing] = useState(false);
+
+  // Existing chapters for THIS question's grade + subject — the autocomplete
+  // pool. Derived from the questions already loaded by the teacher page.
+  const chapterSuggestions = useMemo(
+    () => chaptersFor(questions, form.grade, form.subject),
+    [questions, form.grade, form.subject]
+  );
+  const needsChapterBackfill = isEdit && !normalizeChapter(initialData?.chapter);
 
   const handleRemoveImage = async () => {
     if (form.imagePath) await deleteQuestionImage(form.imagePath);
@@ -121,6 +131,7 @@ export default function QuestionForm({ onSave, onClose, initialData }) {
 
   const invalid =
     !form.text.trim() || !form.grade || !form.subject || !form.difficulty ||
+    !normalizeChapter(form.chapter) ||
     (form.type === "mc" && form.options.some((o) => !o.trim())) ||
     (form.type === "fill_in_blank" && (form.blanks.length === 0 || form.blanks.some((b) => !b.answer.trim())));
 
@@ -131,7 +142,7 @@ export default function QuestionForm({ onSave, onClose, initialData }) {
     // eslint-disable-next-line no-unused-vars
     const { imageDataUrl: _drop, ...formToSave } = form;
     try {
-      await onSave({ ...formToSave, questionType: form.type });
+      await onSave({ ...formToSave, chapter: normalizeChapter(form.chapter), questionType: form.type });
       onClose();
     } catch (err) {
       console.error("Failed to save question:", err);
@@ -201,6 +212,32 @@ export default function QuestionForm({ onSave, onClose, initialData }) {
                 {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
+          </div>
+
+          {/* ── Chapter / Topic ── */}
+          <div>
+            <label style={s.label}>Chapter / Topic <span style={s.required}>*</span></label>
+            {needsChapterBackfill && (
+              <p style={s.chapterNote}>
+                This question has no chapter yet — add one so it's included in chapter progress tracking.
+              </p>
+            )}
+            <input
+              style={{ ...s.input, width: "100%", boxSizing: "border-box" }}
+              list="chapter-suggestions"
+              value={form.chapter}
+              onChange={(e) => setForm({ ...form, chapter: e.target.value })}
+              onBlur={() => setForm((f) => ({ ...f, chapter: normalizeChapter(f.chapter) }))}
+              placeholder={chapterSuggestions.length > 0
+                ? `e.g. ${chapterSuggestions[0]} — pick an existing chapter or type a new one`
+                : "e.g. ทฤษฎีบทพีทาโกรัส"}
+            />
+            <datalist id="chapter-suggestions">
+              {chapterSuggestions.map((c) => <option key={c} value={c} />)}
+            </datalist>
+            <p style={s.chapterHint}>
+              Suggestions show chapters that already exist for {form.grade} {form.subject}. Spacing is normalized on save.
+            </p>
           </div>
 
           {/* ── Drawing / image ── */}
@@ -507,6 +544,8 @@ const s = {
   replaceBtn: { padding: "5px 12px", background: "#f5f5f5", border: "1px solid #ccc", borderRadius: "5px", cursor: "pointer", fontSize: "13px" },
   removeBtn: { padding: "5px 12px", background: "#fff0f0", border: "1px solid #ffcdd2", color: "#c62828", borderRadius: "5px", cursor: "pointer", fontSize: "13px" },
   fitbNote: { margin: "0 0 8px", padding: "8px 12px", background: "#e8f4fd", borderLeft: "3px solid #0f3460", borderRadius: "0 4px 4px 0", fontSize: "13px", color: "#0f3460", lineHeight: "1.5" },
+  chapterNote: { margin: "0 0 8px", padding: "8px 12px", background: "#fff8e1", borderLeft: "3px solid #f9a825", borderRadius: "0 4px 4px 0", fontSize: "13px", color: "#5d4037", lineHeight: "1.5" },
+  chapterHint: { margin: "4px 0 0", fontSize: "11px", color: "#999", fontStyle: "italic" },
   blanksSection: { borderTop: "2px solid #f0f0f0", paddingTop: "16px" },
   blanksHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" },
   blanksEmpty: { fontSize: "13px", color: "#aaa", fontStyle: "italic", margin: "8px 0 0" },

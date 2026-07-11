@@ -18,6 +18,7 @@ import LiveResults from "../components/LiveResults";
 import RewardsAdmin from "../components/RewardsAdmin";
 import StudentRankings from "../components/StudentRankings";
 import MetaBadges, { normalizeGrade } from "../components/MetaBadges";
+import { chaptersFor, normalizeChapter } from "../services/chapters";
 import SessionQRModal from "../components/SessionQRModal";
 import { subscribeAllRequests } from "../services/tokens";
 
@@ -36,6 +37,7 @@ export default function TeacherPage({ user }) {
   const [filterSubject,    setFilterSubject]    = useState("All");
   const [filterDifficulty, setFilterDifficulty] = useState("All");
   const [filterType,       setFilterType]       = useState("All");
+  const [filterChapter,    setFilterChapter]    = useState("All");
 
   useEffect(() => {
     const unsubQ = subscribeQuestions(setQuestions);
@@ -113,11 +115,26 @@ export default function TeacherPage({ user }) {
     await migrateGrades();
   };
 
+  // Chapter options track the currently selected grade + subject filters
+  const chapterOptions = chaptersFor(questions, filterGrade, filterSubject);
+  const hasUncategorized = questions.some((q) => !normalizeChapter(q.chapter));
+
+  // If narrowing grade/subject removed the selected chapter, fall back to All
+  useEffect(() => {
+    if (filterChapter !== "All" && filterChapter !== "Uncategorized" && !chapterOptions.includes(filterChapter)) {
+      setFilterChapter("All");
+    }
+  }, [filterChapter, chapterOptions]);
+
   const filteredQuestions = questions.filter(q =>
     (filterGrade      === "All" || normalizeGrade(q.grade) === filterGrade)          &&
     (filterSubject    === "All" || (q.subject    || "Science") === filterSubject)     &&
     (filterDifficulty === "All" || (q.difficulty || "Easy") === filterDifficulty)    &&
-    (filterType       === "All" || (q.questionType || q.type || "mc") === filterType)
+    (filterType       === "All" || (q.questionType || q.type || "mc") === filterType) &&
+    (filterChapter    === "All" ||
+      (filterChapter === "Uncategorized"
+        ? !normalizeChapter(q.chapter)
+        : normalizeChapter(q.chapter) === filterChapter))
   );
 
   const allExpanded = filteredQuestions.length > 0 && filteredQuestions.every((q) => expanded.has(q.id));
@@ -205,8 +222,11 @@ export default function TeacherPage({ user }) {
               <FilterSelect label="Type"       value={filterType}       onChange={setFilterType}
                 options={["All", "mc", "fill_in_blank", "sa"]}
                 display={v => v === "All" ? "All Types" : v === "mc" ? "Multiple Choice" : v === "sa" ? "Short Answer" : "Fill in the Blank"} />
-              {(filterGrade !== "All" || filterSubject !== "All" || filterDifficulty !== "All" || filterType !== "All") && (
-                <button onClick={() => { setFilterGrade("All"); setFilterSubject("All"); setFilterDifficulty("All"); setFilterType("All"); }} style={s.clearFilter}>
+              <FilterSelect label="Chapter"    value={filterChapter}    onChange={setFilterChapter}
+                options={["All", ...chapterOptions, ...(hasUncategorized ? ["Uncategorized"] : [])]}
+                display={v => v === "All" ? "All Chapters" : v} />
+              {(filterGrade !== "All" || filterSubject !== "All" || filterDifficulty !== "All" || filterType !== "All" || filterChapter !== "All") && (
+                <button onClick={() => { setFilterGrade("All"); setFilterSubject("All"); setFilterDifficulty("All"); setFilterType("All"); setFilterChapter("All"); }} style={s.clearFilter}>
                   ✕ Clear filters
                 </button>
               )}
@@ -274,6 +294,7 @@ export default function TeacherPage({ user }) {
         <QuestionForm
           onSave={handleSaveQuestion}
           onClose={handleCloseForm}
+          questions={questions}
           initialData={editingQuestion}
         />
       )}
@@ -347,7 +368,7 @@ function QuestionCard({ question, selected, disabled, locked, expanded, onToggle
         style={s.checkbox}
       />
       <div style={{ ...s.cardBody, cursor: "pointer" }} onClick={onToggleExpand}>
-        <MetaBadges question={question} />
+        <MetaBadges question={question} chapterBadge />
         {(question.steps?.length ?? 0) > 0 && (
           <span style={s.stepsChip} title="Students solve these steps in Independent Mode after Guided Mode">
             🪜 {question.steps.length} solution step{question.steps.length !== 1 ? "s" : ""}
