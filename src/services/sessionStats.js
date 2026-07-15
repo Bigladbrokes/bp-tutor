@@ -1,6 +1,18 @@
 import { TOKEN_VALUES, tokensForResult } from "./tokens";
 import { tsMs } from "./progress";
 
+// "Stuck" threshold: a student is flagged once they've gone quiet for this
+// long while the session isn't finished for them yet.
+//
+// NOTE on why this isn't per-question: the answer-save flow (StudentPage.js)
+// writes at most ONE result row per item per session — a wrong first attempt
+// saves nothing (just shows "try again"); only the final resolution (correct,
+// or wrong-after-hint) is saved, guarded by `saved.current`. So a single item
+// can never accumulate more than one `correct:false` row in a session, and
+// any "same question wrong N times" counter is structurally unreachable.
+// Elapsed silence is the honest signal the data can actually support.
+export const STUCK_THRESHOLD_MS = 3 * 60 * 1000;
+
 export function dedupeResults(rows) {
   const latest = new Map();
   for (const r of rows) {
@@ -12,7 +24,7 @@ export function dedupeResults(rows) {
   return [...latest.values()];
 }
 
-export function computeSessionStats(session, questions, rawResults, joins) {
+export function computeSessionStats(session, questions, rawResults, joins, nowMs = Date.now()) {
   if (!session || !session.questionIds) {
     return { summary: {}, mostMissed: [], studentRows: [] };
   }
@@ -54,8 +66,6 @@ export function computeSessionStats(session, questions, rawResults, joins) {
       hintsUsed: 0,
       timeToFirstCheckMsSum: 0,
       timeToFirstCheckMsCount: 0,
-      isStuck: false,
-      stuckCounters: new Map(),
     });
   }
 
@@ -71,8 +81,6 @@ export function computeSessionStats(session, questions, rawResults, joins) {
         hintsUsed: 0,
         timeToFirstCheckMsSum: 0,
         timeToFirstCheckMsCount: 0,
-        isStuck: false,
-        stuckCounters: new Map(),
       });
     }
   }
@@ -104,27 +112,6 @@ export function computeSessionStats(session, questions, rawResults, joins) {
     }
   }
 
-  const chronologicalResults = [...(rawResults || [])].sort((a, b) => tsMs(a.timestamp) - tsMs(b.timestamp));
-  
-  for (const r of chronologicalResults) {
-    const st = studentMap.get(r.studentUid);
-    if (!st) continue;
-    
-    const partKey = `${r.questionId}|${r.mode}|${r.blankId ?? ""}|${r.stepId ?? ""}`;
-    let counter = st.stuckCounters.get(partKey) || 0;
-
-    if (r.correct === true) {
-      counter = 0;
-    } else if (r.correct === false) {
-      counter += 1;
-      if (counter >= 3) {
-        st.isStuck = true;
-      }
-    }
-
-    st.stuckCounters.set(partKey, counter);
-  }
-
   let classEarnedSum = 0;
   let classProgressSum = 0;
   let activeStudentCount = 0;
@@ -136,8 +123,8 @@ export function computeSessionStats(session, questions, rawResults, joins) {
     
     const scorePct = maxSessionTokens > 0 ? (st.earnedTokens / maxSessionTokens) * 100 : 0;
     
-    const avgTimeMs = st.timeToFirstCheckMsCount > 0 
-      ? st.timeToFirstCheckMsSum / st.timeToFirstCheckMsCount 
+    const avgTimeMs = st.timeToFirstCheckMsCount > 0
+      ? st.timeToFirstCheckMsSum / st.timeToFirstCheckMsCount
       : null;
 
     if (x > 0) {
@@ -146,12 +133,21 @@ export function computeSessionStats(session, questions, rawResults, joins) {
       activeStudentCount += 1;
     }
 
+    // Stuck = quiet too long while not yet finished. "Quiet" is measured from
+    // the student's last saved answer, or from join time if they haven't
+    // answered anything yet — whichever is more recent (and known).
+    const finished = y > 0 && x >= y;
+    const lastKnownMs = st.lastActiveMs > 0 ? st.lastActiveMs : (st.joinedAtMs || 0);
+    const quietMs = lastKnownMs > 0 ? nowMs - lastKnownMs : 0;
+    const isStuck = y > 0 && !finished && lastKnownMs > 0 && quietMs >= STUCK_THRESHOLD_MS;
+
     return {
       uid: st.uid,
       name: st.name,
       progress: { x, y, label: `${x}/${y}`, pct: progressPct },
       scorePct,
-      isStuck: st.isStuck,
+      isStuck,
+      quietMinutes: isStuck ? Math.floor(quietMs / 60000) : null,
       hintsUsed: st.hintsUsed,
       avgTimeMs,
       lastActiveMs: st.lastActiveMs,

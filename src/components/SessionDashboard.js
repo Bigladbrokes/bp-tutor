@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import KaTeXRenderer from "./KaTeXRenderer";
 import { computeSessionStats } from "../services/sessionStats";
 
@@ -6,9 +6,17 @@ export default function SessionDashboard({ session, questions, results, joins })
   const [sortCol, setSortCol] = useState("name");
   const [sortDesc, setSortDesc] = useState(false);
 
+  // "Stuck" is time-based (quiet too long), so the dashboard needs to keep
+  // re-evaluating as real time passes even when no new data arrives.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
   const stats = useMemo(
-    () => computeSessionStats(session, questions, results, joins),
-    [session, questions, results, joins]
+    () => computeSessionStats(session, questions, results, joins, nowMs),
+    [session, questions, results, joins, nowMs]
   );
 
   const { summary, mostMissed, studentRows } = stats;
@@ -130,7 +138,9 @@ export default function SessionDashboard({ session, questions, results, joins })
                   <td style={s.td}>{Math.round(row.scorePct)}%</td>
                   <td style={s.td}>
                     {row.isStuck ? (
-                      <span style={s.stuckBadge}>⚠️ Stuck</span>
+                      <span style={s.stuckBadge} title="No new answers while the session isn't finished for them">
+                        ⚠️ Quiet {row.quietMinutes}m
+                      </span>
                     ) : (
                       <span style={s.activeBadge}>Active</span>
                     )}
