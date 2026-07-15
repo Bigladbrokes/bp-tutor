@@ -21,6 +21,7 @@ import RewardsAdmin from "../components/RewardsAdmin";
 import StudentRankings from "../components/StudentRankings";
 import MetaBadges, { normalizeGrade } from "../components/MetaBadges";
 import { chaptersFor, normalizeChapter } from "../services/chapters";
+import { moveInSelection } from "../services/selection";
 import SessionQRModal from "../components/SessionQRModal";
 import { subscribeAllRequests } from "../services/tokens";
 
@@ -74,6 +75,16 @@ export default function TeacherPage({ user }) {
       return next;
     });
   };
+
+  const moveSelected = (id, delta) => {
+    setSelected((prev) => {
+      const arr = [...prev];
+      const next = moveInSelection(arr, id, delta);
+      return next === arr ? prev : new Set(next);
+    });
+  };
+  const moveSelectedUp = (id) => moveSelected(id, -1);
+  const moveSelectedDown = (id) => moveSelected(id, 1);
 
   const toggleExpand = (id) => {
     setExpanded((prev) => {
@@ -264,6 +275,10 @@ export default function TeacherPage({ user }) {
                     key={q.id}
                     question={q}
                     selected={selected.has(q.id)}
+                    selectedIndex={selected.has(q.id) ? [...selected].indexOf(q.id) : -1}
+                    totalSelected={selected.size}
+                    onMoveUp={() => moveSelectedUp(q.id)}
+                    onMoveDown={() => moveSelectedDown(q.id)}
                     disabled={!!activeSession}
                     locked={!!activeSession?.questionIds?.includes(q.id)}
                     expanded={expanded.has(q.id)}
@@ -370,16 +385,27 @@ function SessionBanner({ session, selected, onStart, onEnd, onShowQR }) {
   );
 }
 
-function QuestionCard({ question, selected, disabled, locked, expanded, onToggle, onToggleExpand, onEdit, onDelete }) {
+function QuestionCard({ question, selected, selectedIndex, totalSelected, onMoveUp, onMoveDown, disabled, locked, expanded, onToggle, onToggleExpand, onEdit, onDelete }) {
   return (
     <div style={{ ...s.card, borderLeft: selected ? "4px solid #0f3460" : "4px solid transparent" }}>
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggle}
-        disabled={disabled}
-        style={s.checkbox}
-      />
+      <div style={s.checkboxContainer}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          disabled={disabled}
+          style={s.checkbox}
+        />
+        {selected && selectedIndex >= 0 && (
+          <div style={s.orderControls}>
+            <span style={s.orderBadge}>#{selectedIndex + 1}</span>
+            <div style={s.orderArrows}>
+              <button onClick={onMoveUp} disabled={disabled || selectedIndex === 0} style={{...s.orderArrow, opacity: disabled || selectedIndex === 0 ? 0.3 : 1, cursor: disabled || selectedIndex === 0 ? "default" : "pointer"}}>▲</button>
+              <button onClick={onMoveDown} disabled={disabled || selectedIndex === totalSelected - 1} style={{...s.orderArrow, opacity: disabled || selectedIndex === totalSelected - 1 ? 0.3 : 1, cursor: disabled || selectedIndex === totalSelected - 1 ? "default" : "pointer"}}>▼</button>
+            </div>
+          </div>
+        )}
+      </div>
       <div style={{ ...s.cardBody, cursor: "pointer" }} onClick={onToggleExpand}>
         <MetaBadges question={question} chapterBadge />
         {(question.steps?.length ?? 0) > 0 && (
@@ -547,7 +573,12 @@ const s = {
     display: "flex", alignItems: "flex-start", gap: "14px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.07)", transition: "border-left-color 0.15s",
   },
-  checkbox: { marginTop: "3px", width: "17px", height: "17px", cursor: "pointer", flexShrink: 0 },
+  checkboxContainer: { display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", flexShrink: 0, marginTop: "2px", width: "24px" },
+  checkbox: { width: "17px", height: "17px", cursor: "pointer", margin: 0 },
+  orderControls: { display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" },
+  orderBadge: { fontSize: "11px", fontWeight: "700", color: "#0f3460", background: "#e8eef7", padding: "2px 6px", borderRadius: "10px" },
+  orderArrows: { display: "flex", flexDirection: "column", gap: "2px" },
+  orderArrow: { background: "none", border: "none", padding: "2px 4px", fontSize: "10px", color: "#666", lineHeight: "1" },
   cardBody: { flex: 1 },
   qText: { margin: "0 0 10px", fontSize: "15px", lineHeight: "1.7", color: "#1a1a1a", whiteSpace: "pre-line" },
   qTextCollapsed: {
