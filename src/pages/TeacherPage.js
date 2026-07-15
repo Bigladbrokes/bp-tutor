@@ -9,12 +9,14 @@ import {
   endSession,
   subscribeActiveSession,
   subscribeResults,
+  subscribeSessionJoins,
   migrateGrades,
 } from "../services/firestore";
 import { deleteQuestionImage } from "../services/storageService";
 import KaTeXRenderer from "../components/KaTeXRenderer";
 import QuestionForm from "../components/QuestionForm";
 import LiveResults from "../components/LiveResults";
+import SessionDashboard from "../components/SessionDashboard";
 import RewardsAdmin from "../components/RewardsAdmin";
 import StudentRankings from "../components/StudentRankings";
 import MetaBadges, { normalizeGrade } from "../components/MetaBadges";
@@ -26,6 +28,7 @@ export default function TeacherPage({ user }) {
   const [questions, setQuestions] = useState([]);
   const [activeSession, setActiveSession] = useState(undefined);
   const [results, setResults] = useState([]);
+  const [joins, setJoins] = useState([]);
   const [tab, setTab] = useState("questions");
   const [showQR, setShowQR] = useState(false);
   const [redemptionRequests, setRedemptionRequests] = useState([]);
@@ -53,12 +56,15 @@ export default function TeacherPage({ user }) {
   useEffect(() => {
     if (!sessionId) {
       setResults([]);
+      setJoins([]);
       setTab("questions");
       setShowQR(false);
       return;
     }
     setTab("results");
-    return subscribeResults(sessionId, setResults);
+    const unsubR = subscribeResults(sessionId, setResults);
+    const unsubJ = subscribeSessionJoins(sessionId, setJoins);
+    return () => { unsubR(); unsubJ(); };
   }, [sessionId]);
 
   const toggleSelect = (id) => {
@@ -272,13 +278,20 @@ export default function TeacherPage({ user }) {
           </>
         )}
 
-        {/* Live Results tab */}
         {tab === "results" && activeSession && (
-          <LiveResults
-            questions={questions}
-            results={results}
-            sessionQuestionIds={activeSession.questionIds}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
+            <SessionDashboard
+              session={activeSession}
+              questions={questions}
+              results={results}
+              joins={joins}
+            />
+            <LiveResults
+              questions={questions}
+              results={results}
+              sessionQuestionIds={activeSession.questionIds}
+            />
+          </div>
         )}
 
         {/* Rewards tab */}

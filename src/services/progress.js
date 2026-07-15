@@ -26,7 +26,7 @@ import { normalizeChapter } from "./chapters";
 
 export const UNCATEGORIZED = "ยังไม่จัดหมวด";
 
-const tsMs = (v) => v?.toMillis?.() ?? (typeof v === "number" ? v : 0);
+export const tsMs = (v) => v?.toMillis?.() ?? (typeof v === "number" ? v : 0);
 
 export function computeStreak(sessions, results) {
   const rowsBySession = new Map();

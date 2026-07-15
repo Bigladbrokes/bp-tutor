@@ -1,23 +1,9 @@
 import React from "react";
 import KaTeXRenderer from "./KaTeXRenderer";
+import { dedupeResults } from "../services/sessionStats";
 
 // Read question type from either field name (older docs may only have `type`)
 const getQType = (q) => q.questionType || q.type || "mc";
-
-// A student who refreshes mid-session answers again and writes duplicate result
-// rows; keep only the latest row per student/question/blank/step so counts and
-// percentages aren't inflated.
-function dedupeResults(rows) {
-  const latest = new Map();
-  for (const r of rows) {
-    const key = [r.studentUid, r.questionId, r.mode, r.blankId ?? "", r.stepId ?? ""].join("|");
-    const prev = latest.get(key);
-    // A pending local write has no server timestamp yet — treat it as newest
-    const t = (x) => x.timestamp?.toMillis?.() ?? Infinity;
-    if (!prev || t(r) >= t(prev)) latest.set(key, r);
-  }
-  return [...latest.values()];
-}
 
 export default function LiveResults({ questions = [], results: rawResults = [], sessionQuestionIds = [] }) {
   const results = dedupeResults(rawResults);
