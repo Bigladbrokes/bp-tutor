@@ -9,6 +9,7 @@ import {
 import KaTeXRenderer from "../components/KaTeXRenderer";
 import MetaBadges from "../components/MetaBadges";
 import RewardsShop from "../components/RewardsShop";
+import StudentProgress from "../components/StudentProgress";
 
 // Read question type from either field name (Firestore may have either or both)
 const getQType = (q) => q.questionType || q.type || "mc";
@@ -117,6 +118,9 @@ export default function StudentPage({ user }) {
           {phase === "waiting" && (
             <CenteredMsg icon="📋" text="Waiting for your teacher to start a session..." sub="This page will update automatically.">
               <a href="/join" style={s.joinLink}>Have a session code? Enter it here</a>
+              <div style={{ marginTop: 24 }}>
+                <StudentProgress user={user} />
+              </div>
             </CenteredMsg>
           )}
           {phase === "guided" && (
@@ -136,7 +140,9 @@ export default function StudentPage({ user }) {
             />
           )}
           {phase === "done" && (
-            <CenteredMsg icon="✅" text="All done! Great work." sub="Your answers have been submitted to your teacher." iconColor="#2e7d32" />
+            <CenteredMsg icon="✅" text="All done! Great work." sub="Your answers have been submitted to your teacher." iconColor="#2e7d32">
+              <StudentProgress user={user} />
+            </CenteredMsg>
           )}
           {phase === "ended" && (
             <CenteredMsg icon="🏁" text="The session has ended." sub="Answers you already submitted were saved for your teacher." />

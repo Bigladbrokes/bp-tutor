@@ -44,7 +44,10 @@ service cloud.firestore {
     match /results/{resultId} {
       allow get: if isTeacher()
         || (isSignedIn() && resultId.split('_')[1] == request.auth.uid);
-      allow list: if isTeacher();
+      // Students may list ONLY their own rows (the progress page queries
+      // where studentUid == their uid); anything broader stays teacher-only.
+      allow list: if isTeacher()
+        || (isSignedIn() && resource.data.studentUid == request.auth.uid);
       allow create: if isSignedIn()
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.studentEmail == request.auth.token.email

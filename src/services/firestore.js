@@ -98,6 +98,20 @@ export const subscribeSessionJoins = (sessionId, callback) =>
   onSnapshot(collection(db, "sessions", sessionId, "joins"), (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
 
+// --- Student progress (read-only aggregation inputs) ---
+
+export const getAllSessions = async () => {
+  const snap = await getDocs(collection(db, "sessions"));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
+export const getMyResults = async (uid) => {
+  const snap = await getDocs(
+    query(collection(db, "results"), where("studentUid", "==", uid))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
 export const endSession = (sessionId) =>
   updateDoc(doc(db, "sessions", sessionId), {
     isActive: false,
