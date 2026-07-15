@@ -29,7 +29,8 @@ service cloud.firestore {
       match /joins/{uid} {
         allow read: if isTeacher();
         allow create, update: if isSignedIn() && request.auth.uid == uid;
-        allow delete: if false;
+        // Teacher-only: part of permanently deleting a student's data.
+        allow delete: if isTeacher();
       }
     }
 
@@ -53,7 +54,9 @@ service cloud.firestore {
         && request.resource.data.studentEmail == request.auth.token.email
         && resultId.split('_')[1] == request.auth.uid;
       allow update: if isTeacher();
-      allow delete: if false;
+      // Teacher-only: part of permanently deleting a student's data. Students
+      // can still never delete their own rows (replay-proofing is unaffected).
+      allow delete: if isTeacher();
     }
 
     // Student profile + token balance. Students update their own balance as
@@ -65,7 +68,8 @@ service cloud.firestore {
       allow create, update: if isTeacher()
         || (isSignedIn() && request.auth.uid == uid
             && request.resource.data.get('role', 'student') == 'student');
-      allow delete: if false;
+      // Teacher-only permanent delete (trial students who won't return).
+      allow delete: if isTeacher();
     }
 
     // Append-only token ledger. Students may only log their own earned
@@ -77,7 +81,10 @@ service cloud.firestore {
             && request.resource.data.type == "question");
       allow read: if isTeacher()
         || (isSignedIn() && resource.data.studentId == request.auth.uid);
-      allow update, delete: if false;
+      allow update: if false;
+      // Delete is teacher-only, and only ever used to purge a deleted
+      // student's ledger — the append-only guarantee still holds for updates.
+      allow delete: if isTeacher();
     }
 
     // Reward catalog: teacher manages it, students browse it.
@@ -95,7 +102,8 @@ service cloud.firestore {
       allow read: if isTeacher()
         || (isSignedIn() && resource.data.studentId == request.auth.uid);
       allow update: if isTeacher();
-      allow delete: if false;
+      // Teacher-only: part of permanently deleting a student's data.
+      allow delete: if isTeacher();
     }
 
     // Everything else (including the legacy "responses" collection) is denied.

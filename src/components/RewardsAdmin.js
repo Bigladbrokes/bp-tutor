@@ -3,6 +3,7 @@ import {
   subscribeStudents, giveBonusTokens, formatTokens,
   subscribeRewards, addReward, updateReward, deleteReward,
   approveRequest, rejectRequest,
+  adjustStudentBalance, previewStudentDeletion, commitStudentDeletion,
 } from "../services/tokens";
 import { uploadRewardImage, deleteQuestionImage } from "../services/storageService";
 
@@ -173,6 +174,7 @@ export default function RewardsAdmin({ teacherUid, requests }) {
         <RewardForm
           initial={editingReward}
           teacherUid={teacherUid}
+          pendingRequests={requests.filter((r) => r.status === "pending" && r.rewardId === editingReward?.id)}
           onClose={() => { setShowForm(false); setEditingReward(null); }}
         />
       )}
@@ -186,6 +188,8 @@ function StudentRow({ student, teacherUid }) {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [giving, setGiving] = useState(false);
+  const [showAdjust, setShowAdjust] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
 
   const give = async () => {
     const n = parseFloat(amount);
@@ -205,39 +209,227 @@ function StudentRow({ student, teacherUid }) {
   };
 
   return (
-    <div style={s.studentRow}>
-      <div style={s.studentInfo}>
-        <p style={s.rowMain}>{student.studentName || "(no name)"}</p>
-        <p style={s.rowSub}>{student.studentEmail}</p>
+    <>
+      <div style={s.studentRow}>
+        <div style={s.studentInfo}>
+          <p style={s.rowMain}>{student.studentName || "(no name)"}</p>
+          <p style={s.rowSub}>{student.studentEmail}</p>
+        </div>
+        <span style={s.balanceChip}>🪙 {formatTokens(student.tokenBalance ?? 0)}</span>
+        <input
+          type="number"
+          step="0.5"
+          placeholder="Amount"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          style={s.bonusAmount}
+        />
+        <input
+          placeholder="Reason (optional)"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          style={s.bonusReason}
+        />
+        <button onClick={give} disabled={giving} style={s.giveBtn}>
+          {giving ? "…" : "Give Bonus"}
+        </button>
+        <button onClick={() => setShowAdjust(true)} style={s.iconBtn} title="Adjust balance (correction, requires a reason)">⚖️</button>
+        <button onClick={() => setShowDelete(true)} style={s.iconBtn} title="Delete this student permanently">🗑</button>
       </div>
-      <span style={s.balanceChip}>🪙 {formatTokens(student.tokenBalance ?? 0)}</span>
-      <input
-        type="number"
-        step="0.5"
-        placeholder="Amount"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        style={s.bonusAmount}
-      />
-      <input
-        placeholder="Reason (optional)"
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        style={s.bonusReason}
-      />
-      <button onClick={give} disabled={giving} style={s.giveBtn}>
-        {giving ? "…" : "Give Bonus"}
-      </button>
+
+      {showAdjust && (
+        <AdjustBalanceModal student={student} teacherUid={teacherUid} onClose={() => setShowAdjust(false)} />
+      )}
+      {showDelete && (
+        <DeleteStudentModal student={student} onClose={() => setShowDelete(false)} />
+      )}
+    </>
+  );
+}
+
+// ─── Adjust balance modal (Task 2) ────────────────────────────────────────────
+// Distinct from "Give Bonus" above: the reason is mandatory, the ledger entry
+// is tagged "adjustment" (not "bonus"), and the balance can never go negative.
+
+function AdjustBalanceModal({ student, teacherUid, onClose }) {
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const current = student.tokenBalance ?? 0;
+  const parsed = parseFloat(amount);
+  const hasAmount = !isNaN(parsed) && parsed !== 0;
+  const projected = hasAmount ? current + parsed : current;
+  const wouldGoNegative = hasAmount && projected < 0;
+  const canSave = hasAmount && !wouldGoNegative && reason.trim().length > 0 && !saving;
+
+  const save = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      await adjustStudentBalance(student, parsed, reason.trim(), teacherUid);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={s.overlay}>
+      <div style={s.modal}>
+        <div style={s.modalHeader}>
+          <h2 style={s.modalTitle}>Adjust Balance — {student.studentName || "(no name)"}</h2>
+          <button onClick={onClose} style={s.closeBtn}>✕</button>
+        </div>
+        <div style={s.modalBody}>
+          <p style={s.rowSub}>Current balance: <strong>🪙 {formatTokens(current)}</strong></p>
+
+          <label style={s.label}>Amount (+ or −)</label>
+          <input type="number" step="0.5" style={s.input} value={amount}
+            onChange={(e) => setAmount(e.target.value)} placeholder="e.g. -5 or 10" autoFocus />
+
+          {hasAmount && (
+            <p style={{ ...s.rowSub, color: wouldGoNegative ? "#c62828" : "#2e7d32" }}>
+              New balance would be: 🪙 {formatTokens(projected)}
+              {wouldGoNegative && " — not allowed, balance cannot go below 0"}
+            </p>
+          )}
+
+          <label style={s.label}>Reason <span style={{ color: "#c62828" }}>*</span> (required — explains this change in the token history)</label>
+          <textarea style={{ ...s.input, minHeight: "60px", resize: "vertical" }} value={reason}
+            onChange={(e) => setReason(e.target.value)} placeholder="e.g. Corrected a duplicate bonus given on 7/10" />
+
+          {error && <p style={{ ...s.rowSub, color: "#c62828" }}>{error}</p>}
+        </div>
+        <div style={s.modalFooter}>
+          <button onClick={onClose} style={s.cancelBtn}>Cancel</button>
+          <button onClick={save} disabled={!canSave} style={{ ...s.saveBtn, opacity: canSave ? 1 : 0.5 }}>
+            {saving ? "Saving…" : "Save Adjustment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete student modal (Task 1) ────────────────────────────────────────────
+// Irreversible. Requires typing the student's name to confirm, shows exact
+// counts of everything that will be deleted, and warns that signing in again
+// creates a fresh empty profile (their Google account can't be blocked).
+
+function DeleteStudentModal({ student, onClose }) {
+  const [preview, setPreview] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    previewStudentDeletion(student.id)
+      .then((p) => { if (!cancelled) setPreview(p); })
+      .catch((err) => { if (!cancelled) setLoadError(err.message); });
+    return () => { cancelled = true; };
+  }, [student.id]);
+
+  // Type the student's exact name to confirm; fall back to the Thai word for
+  // "delete" if the account somehow has no name to type.
+  const confirmWord = (student.studentName || "").trim() || "ลบ";
+  const confirmed = confirmText.trim().toLowerCase() === confirmWord.toLowerCase();
+
+  const handleDelete = async () => {
+    if (!preview || !confirmed) return;
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await commitStudentDeletion(preview);
+      onClose();
+    } catch (err) {
+      // Logged explicitly — Firestore doesn't always surface a batch
+      // rejection to the console on its own, and this is the one place a
+      // developer can find out what actually happened.
+      console.error("Student delete failed:", err.code, err.message);
+      const deniedByRules = err.code === "permission-denied";
+      setDeleteError(
+        deniedByRules
+          ? "การลบถูกปฏิเสธโดยเซิร์ฟเวอร์ (permission denied) — most likely the Firestore security rules for delete haven't been deployed yet. Nothing was deleted. Tell your developer."
+          : `การลบล้มเหลว: ${err.message}`
+      );
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div style={s.overlay}>
+      <div style={s.modal}>
+        <div style={s.modalHeader}>
+          <h2 style={{ ...s.modalTitle, color: "#c62828" }}>ลบนักเรียนถาวร</h2>
+          <button onClick={onClose} style={s.closeBtn}>✕</button>
+        </div>
+        <div style={s.modalBody}>
+          {loadError && <p style={{ color: "#c62828" }}>ไม่สามารถโหลดข้อมูลได้: {loadError}</p>}
+
+          {!preview && !loadError && <p style={s.rowSub}>กำลังตรวจสอบข้อมูลที่จะลบ…</p>}
+
+          {preview && (
+            <>
+              <p style={s.rowMain}>
+                ลบ <strong>{student.studentName || "(no name)"}</strong> ถาวร? จะลบ:
+              </p>
+              <ul style={{ margin: "4px 0 0", paddingLeft: "20px", fontSize: "14px", color: "#333", lineHeight: "1.8" }}>
+                <li>ข้อมูลนักเรียน (โปรไฟล์และยอด token)</li>
+                <li>ผลการทำโจทย์ {preview.resultRefs.length} แถว</li>
+                <li>ประวัติ token {preview.tokenHistoryRefs.length} รายการ</li>
+                <li>คำขอแลกรางวัล {preview.requestRefs.length} รายการ</li>
+                <li>ประวัติการเข้าร่วมคาบเรียน {preview.joinRefs.length} คาบ</li>
+              </ul>
+
+              <div style={s.deleteWarning}>
+                ⚠️ การลบนี้ย้อนกลับไม่ได้ และถ้านักเรียนคนนี้ล็อกอินเข้ามาอีกครั้ง ระบบจะสร้างโปรไฟล์ใหม่ที่ว่างเปล่าให้อัตโนมัติ
+                (เราปิดกั้นบัญชี Google ของเขาไม่ได้) — เป็นเรื่องปกติ ไม่ใช่บั๊ก
+              </div>
+
+              <label style={s.label}>
+                พิมพ์ "{confirmWord}" เพื่อยืนยัน
+              </label>
+              <input style={s.input} value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
+                placeholder={confirmWord} autoFocus />
+
+              {deleteError && (
+                <div style={s.deleteFailedBanner}>
+                  ❌ Delete failed — nothing was removed.<br />{deleteError}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div style={s.modalFooter}>
+          <button onClick={onClose} style={s.cancelBtn}>Cancel</button>
+          <button
+            onClick={handleDelete}
+            disabled={!preview || !confirmed || deleting}
+            style={{ ...s.deleteConfirmBtn, opacity: !preview || !confirmed || deleting ? 0.5 : 1 }}
+          >
+            {deleting ? "กำลังลบ…" : "ลบถาวร"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ─── Add / edit reward modal ──────────────────────────────────────────────────
 
-function RewardForm({ initial, teacherUid, onClose }) {
+function RewardForm({ initial, teacherUid, pendingRequests = [], onClose }) {
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name || "");
   const [tokenCost, setTokenCost] = useState(initial?.tokenCost ?? 10);
+  // Each pending request locked in the reward's price at the moment it was
+  // requested (see createRedemptionRequest / approveRequest) — changing the
+  // price here never touches those already-locked amounts.
+  const lockedPrices = [...new Set(pendingRequests.map((r) => r.tokenCost))];
   const [trackStock, setTrackStock] = useState(typeof initial?.stock === "number");
   const [stock, setStock] = useState(typeof initial?.stock === "number" ? initial.stock : 10);
   const [imageUrl, setImageUrl] = useState(initial?.imageUrl || "");
@@ -323,6 +515,16 @@ function RewardForm({ initial, teacherUid, onClose }) {
               </div>
             </div>
           </div>
+
+          {lockedPrices.length > 0 && (
+            <div style={s.priceWarning}>
+              ⚠️ {pendingRequests.length} pending request{pendingRequests.length !== 1 ? "s" : ""} for this reward.
+              {" "}Changing the price here will <strong>not</strong> affect{pendingRequests.length !== 1 ? " them" : " it"} —
+              {lockedPrices.length === 1
+                ? <> approval will still charge 🪙 {formatTokens(lockedPrices[0])}, the price when requested.</>
+                : <> each will still be charged the price locked in at request time: {lockedPrices.map((p) => `🪙 ${formatTokens(p)}`).join(", ")}.</>}
+            </div>
+          )}
         </div>
 
         <div style={s.modalFooter}>
@@ -425,6 +627,19 @@ const s = {
   checkLabel: { display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", whiteSpace: "nowrap", cursor: "pointer" },
   formImg: { maxWidth: "140px", maxHeight: "100px", objectFit: "contain", borderRadius: "6px", border: "1px solid #eee" },
   uploadNote: { margin: 0, fontSize: "12px", color: "#888", fontStyle: "italic" },
+  priceWarning: {
+    background: "#fff8e1", border: "1px solid #ffe082", borderRadius: "8px",
+    padding: "10px 14px", fontSize: "13px", color: "#5d4037", lineHeight: "1.5",
+  },
   cancelBtn: { padding: "8px 18px", background: "#f0f0f0", border: "1px solid #ddd", borderRadius: "6px", cursor: "pointer", fontSize: "14px" },
   saveBtn: { padding: "8px 22px", background: "#0f3460", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px", fontWeight: "600" },
+  deleteConfirmBtn: { padding: "8px 22px", background: "#c62828", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px", fontWeight: "700" },
+  deleteWarning: {
+    background: "#fdecea", border: "1px solid #f5c6cb", borderRadius: "8px",
+    padding: "10px 14px", fontSize: "13px", color: "#7a1f1f", lineHeight: "1.6",
+  },
+  deleteFailedBanner: {
+    background: "#c62828", color: "#fff", borderRadius: "8px",
+    padding: "12px 16px", fontSize: "13px", fontWeight: "600", lineHeight: "1.6",
+  },
 };

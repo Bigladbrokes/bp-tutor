@@ -1,8 +1,9 @@
 import {
-  collection, doc, addDoc, deleteDoc, getDoc, onSnapshot, query, where,
+  collection, doc, addDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where,
   runTransaction, serverTimestamp, increment, updateDoc, setDoc, writeBatch,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { getAllSessions } from "./firestore";
 
 // ─── Token values ─────────────────────────────────────────────────────────────
 
@@ -130,6 +131,43 @@ export const giveBonusTokens = (student, amount, reason, teacherUid) => {
   return batch.commit();
 };
 
+// Pure floor-guard: given a current balance and a signed delta, returns the
+// resulting balance or throws if it would go negative. Extracted so the
+// boundary logic (exactly 0 is fine, -0.01 is not) is testable without
+// mocking Firestore.
+export function applyBalanceAdjustment(currentBalance, amount) {
+  const next = (currentBalance ?? 0) + amount;
+  if (next < 0) {
+    throw new Error(`This would put the balance below 0 (currently ${formatTokens(currentBalance ?? 0)}).`);
+  }
+  return next;
+}
+
+// Manual balance correction — distinct from giveBonusTokens: the reason is
+// mandatory (not optional), the type tag is "adjustment" (not "bonus"), and
+// the balance can never be pushed negative. Read-check-write in a transaction
+// because increment() has no way to express a floor.
+export const adjustStudentBalance = (student, amount, reason, teacherUid) => {
+  const cleanReason = (reason || "").trim();
+  if (!cleanReason) return Promise.reject(new Error("A reason is required."));
+  return runTransaction(db, async (t) => {
+    const studentRef = doc(db, "students", student.id);
+    const snap = await t.get(studentRef);
+    const current = snap.exists() ? (snap.data().tokenBalance ?? 0) : 0;
+    const next = applyBalanceAdjustment(current, amount);
+    t.set(studentRef, { tokenBalance: next, updatedAt: serverTimestamp() }, { merge: true });
+    t.set(doc(collection(db, "tokenHistory")), {
+      studentId: student.id,
+      studentName: student.studentName ?? "",
+      amount,
+      type: "adjustment",
+      reason: cleanReason,
+      givenBy: teacherUid,
+      timestamp: serverTimestamp(),
+    });
+  });
+};
+
 export const subscribeMyTokenHistory = (uid, callback) =>
   onSnapshot(
     query(collection(db, "tokenHistory"), where("studentId", "==", uid)),
@@ -228,3 +266,61 @@ export const rejectRequest = (requestId, teacherUid, reason) =>
     resolvedBy: teacherUid,
     rejectReason: reason || "",
   });
+
+// ─── Permanent student deletion ────────────────────────────────────────────────
+// Two-step: gather every doc reference first (so the confirmation modal shows
+// exactly what will be deleted), then delete precisely those refs — nothing
+// is re-queried between preview and commit.
+
+// Firestore hard-caps a single batch at 500 writes; 400 leaves headroom.
+// Exported so it's directly testable without constructing 400 fake refs.
+export function chunkRefs(refs, size = 400) {
+  const chunks = [];
+  for (let i = 0; i < refs.length; i += size) chunks.push(refs.slice(i, i + size));
+  return chunks;
+}
+
+export const previewStudentDeletion = async (uid) => {
+  const [resultsSnap, historySnap, requestsSnap, allSessions] = await Promise.all([
+    getDocs(query(collection(db, "results"), where("studentUid", "==", uid))),
+    getDocs(query(collection(db, "tokenHistory"), where("studentId", "==", uid))),
+    getDocs(query(collection(db, "redemptionRequests"), where("studentId", "==", uid))),
+    getAllSessions(),
+  ]);
+
+  // A join marker doc doesn't exist for every session the student never
+  // joined, so each candidate has to be checked individually.
+  const joinRefs = allSessions.map((sess) => doc(db, "sessions", sess.id, "joins", uid));
+  const joinSnaps = await Promise.all(joinRefs.map((ref) => getDoc(ref)));
+  const existingJoinRefs = joinRefs.filter((_, i) => joinSnaps[i].exists());
+
+  return {
+    studentRef: doc(db, "students", uid),
+    resultRefs: resultsSnap.docs.map((d) => d.ref),
+    tokenHistoryRefs: historySnap.docs.map((d) => d.ref),
+    requestRefs: requestsSnap.docs.map((d) => d.ref),
+    joinRefs: existingJoinRefs,
+  };
+};
+
+// Deletes exactly the refs a prior previewStudentDeletion() collected. Each
+// chunk of ≤400 commits as one atomic batch; a student with under ~400 total
+// documents (true for every account in this app today) is deleted in a
+// single all-or-nothing batch. A student who somehow exceeds that would be
+// deleted across multiple batches — each chunk is still atomic, but the
+// operation as a whole would not be, on a catastrophic failure between
+// chunks. Documented rather than silently overclaimed.
+export const commitStudentDeletion = async (preview) => {
+  const allRefs = [
+    preview.studentRef,
+    ...preview.resultRefs,
+    ...preview.tokenHistoryRefs,
+    ...preview.requestRefs,
+    ...preview.joinRefs,
+  ];
+  for (const chunk of chunkRefs(allRefs)) {
+    const batch = writeBatch(db);
+    chunk.forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+};
