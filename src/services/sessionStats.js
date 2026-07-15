@@ -127,6 +127,7 @@ export function computeSessionStats(session, questions, rawResults, joins) {
 
   let classEarnedSum = 0;
   let classProgressSum = 0;
+  let activeStudentCount = 0;
 
   const studentRows = Array.from(studentMap.values()).map((st) => {
     const x = st.uniqueQuestionsAttempted.size;
@@ -139,8 +140,11 @@ export function computeSessionStats(session, questions, rawResults, joins) {
       ? st.timeToFirstCheckMsSum / st.timeToFirstCheckMsCount 
       : null;
 
-    classEarnedSum += st.earnedTokens;
-    classProgressSum += progressPct;
+    if (x > 0) {
+      classEarnedSum += st.earnedTokens;
+      classProgressSum += progressPct;
+      activeStudentCount += 1;
+    }
 
     return {
       uid: st.uid,
@@ -172,11 +176,11 @@ export function computeSessionStats(session, questions, rawResults, joins) {
     .map(m => m.id);
 
   const totalStudents = studentRows.length;
-  const avgScorePct = totalStudents > 0 && maxSessionTokens > 0 
-    ? ((classEarnedSum / totalStudents) / maxSessionTokens) * 100 
+  const avgScorePct = activeStudentCount > 0 && maxSessionTokens > 0 
+    ? ((classEarnedSum / activeStudentCount) / maxSessionTokens) * 100 
     : 0;
-  const classProgressPct = totalStudents > 0 
-    ? classProgressSum / totalStudents 
+  const classProgressPct = activeStudentCount > 0 
+    ? classProgressSum / activeStudentCount 
     : 0;
 
   return {
