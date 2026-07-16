@@ -172,12 +172,20 @@ export function computeSessionStats(session, questions, rawResults, joins, nowMs
     .map(m => m.id);
 
   const totalStudents = studentRows.length;
-  const avgScorePct = activeStudentCount > 0 && maxSessionTokens > 0 
-    ? ((classEarnedSum / activeStudentCount) / maxSessionTokens) * 100 
+  const avgScorePct = activeStudentCount > 0 && maxSessionTokens > 0
+    ? ((classEarnedSum / activeStudentCount) / maxSessionTokens) * 100
     : 0;
-  const classProgressPct = activeStudentCount > 0 
-    ? classProgressSum / activeStudentCount 
+  const classProgressPct = activeStudentCount > 0
+    ? classProgressSum / activeStudentCount
     : 0;
+
+  // Raw deduped rows grouped per student, for the row drill-down. Already
+  // deduped, so the detail panel is consistent with every aggregate above and
+  // needs no extra Firestore reads.
+  const rowsByUid = {};
+  for (const r of dedupedResults) {
+    (rowsByUid[r.studentUid] = rowsByUid[r.studentUid] || []).push(r);
+  }
 
   return {
     summary: {
@@ -187,5 +195,41 @@ export function computeSessionStats(session, questions, rawResults, joins, nowMs
     },
     mostMissed,
     studentRows,
+    rowsByUid,
   };
+}
+
+// Groups one student's (already deduped) rows by question in session order,
+// for the drill-down panel. Within a question, guided rows come before
+// independent ones: MC / blank-1..blank-N, then step-1..step-N, then any
+// free-form answer last. Rows for questions no longer in the session
+// (deleted mid-session) are appended at the end so nothing silently vanishes.
+export function studentDetailByQuestion(rows, orderedQ) {
+  const byQ = new Map();
+  for (const r of rows || []) {
+    if (!byQ.has(r.questionId)) byQ.set(r.questionId, []);
+    byQ.get(r.questionId).push(r);
+  }
+  const rank = (r) => {
+    if (r.mode === "guided") return r.blankId != null ? r.blankId : 0;
+    if (r.stepId) return 1000 + (r.stepOrder ?? 0);
+    return 2000; // free-form independent answer, last
+  };
+  const sortRows = (arr) => [...arr].sort((a, b) => rank(a) - rank(b));
+
+  const out = [];
+  const used = new Set();
+  for (const q of orderedQ || []) {
+    const qRows = byQ.get(q.id);
+    if (qRows && qRows.length) {
+      out.push({ question: q, rows: sortRows(qRows) });
+      used.add(q.id);
+    }
+  }
+  for (const [qid, qRows] of byQ) {
+    if (!used.has(qid)) {
+      out.push({ question: { id: qid, text: "(deleted question)" }, rows: sortRows(qRows) });
+    }
+  }
+  return out;
 }

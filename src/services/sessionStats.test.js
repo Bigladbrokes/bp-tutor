@@ -1,4 +1,4 @@
-import { computeSessionStats, STUCK_THRESHOLD_MS } from "./sessionStats";
+import { computeSessionStats, studentDetailByQuestion, STUCK_THRESHOLD_MS } from "./sessionStats";
 
 // Anchor "now" so quiet-duration math is deterministic regardless of when
 // the test actually runs.
@@ -120,4 +120,71 @@ test("multiple students: only the quiet, unfinished one is flagged", () => {
   const stuck = stats.studentRows.filter((r) => r.isStuck).map((r) => r.name);
 
   expect(stuck).toEqual(["Alice"]);
+});
+
+// ─── Per-student drill-down data (Task: click-to-expand) ──────────────────────
+
+test("rowsByUid groups each student's deduped rows under their uid", () => {
+  const results = [
+    row("s1", "q1", 5), row("s1", "q2", 4),
+    row("s2", "q1", 5),
+  ];
+  const stats = computeSessionStats(mockSession, mockQuestions, results, [], NOW);
+  expect(stats.rowsByUid.s1).toHaveLength(2);
+  expect(stats.rowsByUid.s2).toHaveLength(1);
+  expect(stats.rowsByUid.s1.every((r) => r.studentUid === "s1")).toBe(true);
+});
+
+test("rowsByUid keeps only the latest row per item (deduped), not replayed duplicates", () => {
+  const older = { ...row("s1", "q1", 10), answer: "0" };
+  const newer = { ...row("s1", "q1", 2), answer: "1" };
+  const stats = computeSessionStats(mockSession, mockQuestions, [older, newer], [], NOW);
+  expect(stats.rowsByUid.s1).toHaveLength(1);
+  expect(stats.rowsByUid.s1[0].answer).toBe("1"); // the newer one
+});
+
+describe("studentDetailByQuestion", () => {
+  const orderedQ = [{ id: "q1", text: "Q one" }, { id: "q2", text: "Q two" }];
+
+  test("groups rows by question in session order, omitting untouched questions", () => {
+    const rows = [{ questionId: "q2", mode: "guided" }]; // only q2 answered
+    const detail = studentDetailByQuestion(rows, orderedQ);
+    expect(detail).toHaveLength(1);
+    expect(detail[0].question.id).toBe("q2");
+  });
+
+  test("within a question: guided rows before independent, blanks and steps in order", () => {
+    const rows = [
+      { questionId: "q1", mode: "independent", stepId: "b", stepOrder: 2 },
+      { questionId: "q1", mode: "independent", stepId: "a", stepOrder: 1 },
+      { questionId: "q1", mode: "guided", blankId: 2 },
+      { questionId: "q1", mode: "guided", blankId: 1 },
+      { questionId: "q1", mode: "independent", stepId: null }, // free-form last
+    ];
+    const detail = studentDetailByQuestion(rows, orderedQ);
+    const ordered = detail[0].rows;
+    expect(ordered.map((r) => [r.mode, r.blankId ?? r.stepOrder ?? "free"])).toEqual([
+      ["guided", 1],
+      ["guided", 2],
+      ["independent", 1],
+      ["independent", 2],
+      ["independent", "free"],
+    ]);
+  });
+
+  test("rows for a deleted question are appended with a placeholder", () => {
+    const rows = [
+      { questionId: "q1", mode: "guided" },
+      { questionId: "gone", mode: "guided" },
+    ];
+    const detail = studentDetailByQuestion(rows, orderedQ);
+    expect(detail).toHaveLength(2);
+    expect(detail[1].question.id).toBe("gone");
+    expect(detail[1].question.text).toBe("(deleted question)");
+  });
+
+  test("empty rows yields an empty detail list", () => {
+    expect(studentDetailByQuestion([], orderedQ)).toEqual([]);
+    expect(studentDetailByQuestion(undefined, orderedQ)).toEqual([]);
+  });
 });
