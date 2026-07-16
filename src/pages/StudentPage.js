@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { logOut } from "../services/auth";
 import { subscribeActiveSession, getQuestionsByIds, markSessionJoin } from "../services/firestore";
 import { shuffledOptions } from "../services/shuffle";
+import { normalizeMathAnswer } from "../services/mathAnswer";
+import MathKeypad from "../components/MathKeypad";
 import {
   tokensForResult, saveResultWithTokens,
   subscribeStudent, formatTokens,
@@ -312,6 +314,11 @@ function FitBQuestion({ question, onResult, onNext }) {
 
   // Use 0-indexed arrays — avoids any Firestore integer/string id-matching issues
   const [answers, setAnswers] = useState(() => Array(blanks.length).fill(""));
+  // One shared keypad for however many blanks this question has: which blank
+  // is focused, plus a ref to that blank's live DOM node (for cursor-aware
+  // insertion). null = no blank focused, keypad hidden.
+  const [focusedBlank, setFocusedBlank] = useState(null);
+  const focusedInputRef = useRef(null);
   // null | "correct" | "wrong" | "revealed"
   const [status, setStatus] = useState(() => Array(blanks.length).fill(null));
   const [attempt, setAttempt] = useState(1);
@@ -322,10 +329,11 @@ function FitBQuestion({ question, onResult, onNext }) {
   // together, so every blank row of this question shares the same timing.
   const { markCheck, timing } = useAnswerTiming();
 
-  const normalize = (v) => v.trim().toLowerCase().replace(/\s+/g, " ");
   const matchesOne = (val, expected) => {
-    const clean = (s) => normalize(s).replace(/(\d)\s+([a-z])/g, "$1$2");
-    if (clean(val) === clean(expected)) return true;
+    // Canonical-form comparison: handles √/∛/fractions/exponents plus the
+    // plain case/whitespace/unit-suffix normalization the old clean() did
+    // (whitespace is stripped entirely, so "5 cm" and "5cm" still match).
+    if (normalizeMathAnswer(val) === normalizeMathAnswer(expected)) return true;
     // Numeric match with the same default tolerance as independent-mode steps
     const a = parseFloat(val), b = parseFloat(expected);
     if (isNaN(a) || isNaN(b)) return false;
@@ -396,7 +404,16 @@ function FitBQuestion({ question, onResult, onNext }) {
         answers={answers}
         status={status}
         onChange={handleAnswerChange}
+        onFocusBlank={(idx, el) => { setFocusedBlank(idx); focusedInputRef.current = el; }}
       />
+
+      {focusedBlank != null && status[focusedBlank] !== "correct" && status[focusedBlank] !== "revealed" && (
+        <MathKeypad
+          value={answers[focusedBlank] || ""}
+          inputRef={focusedInputRef}
+          onChange={(v) => handleAnswerChange(focusedBlank, v)}
+        />
+      )}
 
       {wrongIndices.filter(i => blanks[i]?.hint).map(i => (
         <Hint key={i} text={`[${i + 1}] ${blanks[i].hint}`} />
@@ -429,7 +446,7 @@ function FitBQuestion({ question, onResult, onNext }) {
 // Renders question text with [1], [2], [3] replaced by inline input boxes.
 // Falls back to a numbered list if text is empty or has no [N] markers.
 // Uses 0-indexed arrays: [N] in text → blanks[N-1], answers[N-1], status[N-1].
-function FitBInline({ text, blanks, answers, status, onChange }) {
+function FitBInline({ text, blanks, answers, status, onChange, onFocusBlank }) {
   const safeText = text || "";
   const hasMarkers = /\[\d+\]/.test(safeText);
 
@@ -458,6 +475,7 @@ function FitBInline({ text, blanks, answers, status, onChange }) {
         type="text"
         value={displayValue}
         onChange={(e) => !locked && onChange(idx, e.target.value)}
+        onFocus={(e) => onFocusBlank(idx, e.target)}
         readOnly={locked}
         placeholder="____"
         style={{
@@ -582,11 +600,9 @@ function parseStepNum(v) {
 }
 
 function matchStepOne(val, expected, tol) {
-  const norm = v => v.trim().toLowerCase().replace(/\s+/g, " ");
-  if (norm(val) === norm(expected)) return true;
-
-  const normF = v => v.replace(/\s/g, "").replace(/÷/g, "/").replace(/×/g, "*").toLowerCase();
-  if (val.trim() && normF(val) === normF(expected)) return true;
+  // Canonical-form comparison: handles √/∛/fractions/exponents plus the
+  // plain case/whitespace/÷×-normalization the old norm()/normF() did.
+  if (val.trim() && normalizeMathAnswer(val) === normalizeMathAnswer(expected)) return true;
 
   const a = parseStepNum(val), b = parseStepNum(expected);
   if (!isNaN(a) && !isNaN(b)) {
@@ -690,15 +706,18 @@ function QuestionStepper({ question, onDone, onSaveStep }) {
         {showHint && <Hint text={currentStep.hint} />}
 
         {!isResolved && (
-          <input
-            ref={inputRef}
-            style={s.stepInput}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && check()}
-            placeholder="Type your answer…"
-            autoFocus
-          />
+          <>
+            <input
+              ref={inputRef}
+              style={s.stepInput}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && check()}
+              placeholder="Type your answer…"
+              autoFocus
+            />
+            <MathKeypad value={input} inputRef={inputRef} onChange={setInput} />
+          </>
         )}
 
         <div style={s.btnRow}>
@@ -723,6 +742,7 @@ function QuestionStepper({ question, onDone, onSaveStep }) {
 
 function SimpleAnswer({ question, onDone, onSave }) {
   const [input, setInput] = useState("");
+  const inputRef = useRef(null);
   // Free-form has a single submit: first check and resolution coincide
   const { markCheck, timing } = useAnswerTiming();
 
@@ -745,6 +765,7 @@ function SimpleAnswer({ question, onDone, onSave }) {
       <div style={s.card}>
         <p style={{ ...s.stepInstruction, color: "#888", fontStyle: "italic" }}>Write your answer in your own words.</p>
         <textarea
+          ref={inputRef}
           style={s.textarea}
           rows={4}
           value={input}
@@ -752,6 +773,7 @@ function SimpleAnswer({ question, onDone, onSave }) {
           placeholder="Type your answer here…"
           autoFocus
         />
+        <MathKeypad value={input} inputRef={inputRef} onChange={setInput} />
         <div style={s.btnRow}>
           <Btn disabled={!input.trim()} onClick={submit} color="#1565c0">Submit Answer →</Btn>
         </div>
