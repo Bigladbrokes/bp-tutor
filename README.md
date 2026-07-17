@@ -10,8 +10,23 @@ A classroom "exit ticket" quiz app for math and science tutoring, built with Rea
 ## Tech stack
 
 - React 19 (Create React App), inline styles, no router in use
-- Firebase: Google Auth, Firestore (questions / sessions / results), Storage (question images and drawings)
+- Firebase: Google Auth, Firestore (questions / sessions / results), Storage (question images and drawings), Hosting
 - KaTeX via `react-katex` for math rendering
+
+## Production
+
+- **URL:** https://bp-tutor-3db94.web.app
+- **Firebase project ID:** `bp-tutor-3db94`
+
+## Key services (`src/services/`)
+
+| File | What it does |
+|------|--------------|
+| `progress.js` | Student motivation metrics (streaks, completion %) — fully derived from sessions + result rows on every load, nothing stored |
+| `sessionStats.js` | Live per-student session stats for the teacher dashboard, including the "stuck" (gone-quiet) flag |
+| `mathAnswer.js` | Normalizes typed/keypad math answers to a canonical string so equivalent forms (sqrt, fractions, exponents) compare equal; numeric-tolerance fallback runs separately |
+| `shuffle.js` | Deterministic per-student MC option shuffling — order is a pure function of (studentUid, questionId), so neighbors see different orders but each student's order is stable |
+| `tokens.js` | Token economy: earn values by difficulty, append-only ledger, transactional redemption approval that re-checks balance and stock |
 
 ## Getting started
 
@@ -23,6 +38,19 @@ npm run build    # production build in build/
 ```
 
 The Firebase project config lives in `src/config/firebase.js`. The web API key there is not a secret — access control comes entirely from the security rules below.
+
+## Deploying
+
+```
+npm run build
+firebase deploy --only hosting
+```
+
+## Gotchas (learned the hard way)
+
+- **Always start sessions from the production URL, not localhost** — the session QR code encodes `window.location.origin`, so a session started from a dev server hands students a localhost link.
+- **Restart the dev server if new files aren't being served** — the Windows file watcher misses newly created files.
+- **`npm run build` compiles from the working tree, not from the last commit** — stash unwanted changes before building, or you deploy them.
 
 ## Security rules (important)
 
