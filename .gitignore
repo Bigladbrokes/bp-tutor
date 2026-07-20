@@ -29,3 +29,6 @@ PROJECT_STATUS.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# local video reference material (large, not for the repo)
+/videos

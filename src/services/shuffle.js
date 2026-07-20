@@ -18,8 +18,9 @@ export const hashSeed = (str) => {
   return h >>> 0;
 };
 
-// mulberry32 — tiny deterministic PRNG
-const mulberry32 = (seed) => () => {
+// mulberry32 — tiny deterministic PRNG (also shared by steppedParams.js —
+// exported so the implementation exists exactly once)
+export const mulberry32 = (seed) => () => {
   seed = (seed + 0x6d2b79f5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
