@@ -128,11 +128,24 @@ test("absolute tolerance: within the flat band passes, outside fails", () => {
   expect(checkAnswer(29.72, 29.61, tol)).toBe(false);
 });
 
-test("exact boundary is inclusive (constants chosen to be float-exact)", () => {
-  // 30.0, 29.5, and 0.5 are all exactly representable in binary, so the diff
-  // is exactly the tolerance. (29.7/0.3 would NOT be — 30.0-29.7 is
-  // 0.30000000000000426 in IEEE754 — a float artifact, not a grading rule.)
+test("exact boundary is inclusive (float-exact constants)", () => {
   expect(checkAnswer(30.0, 29.5, { type: "absolute", value: 0.5 })).toBe(true);
+});
+
+test("float-artifact boundary passes via the §3.4 epsilon: 30.0 vs 29.7 at abs 0.3", () => {
+  // 30.0-29.7 computes to 0.30000000000000426 in IEEE754 — mathematically
+  // exactly on the boundary. The 1e-9-scaled epsilon absorbs the artifact.
+  expect(checkAnswer(30.0, 29.7, { type: "absolute", value: 0.3 })).toBe(true);
+});
+
+test("§3.4 doc example: expected 29.6, absolute tol 0.1, student 29.7 passes", () => {
+  expect(checkAnswer(29.7, 29.6, { type: "absolute", value: 0.1 })).toBe(true);
+});
+
+test("epsilon does not loosen real grading: just-beyond answers still fail", () => {
+  // 0.001 past the band — far above the 1e-9-scale epsilon
+  expect(checkAnswer(29.701, 29.6, { type: "absolute", value: 0.1 })).toBe(false);
+  expect(checkAnswer(30.2, 29.61, { type: "relative", value: 0.01 })).toBe(false);
 });
 
 test("non-numeric or missing tolerance never passes", () => {

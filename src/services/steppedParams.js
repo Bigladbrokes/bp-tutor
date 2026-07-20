@@ -161,15 +161,23 @@ export function evaluateAnswerExpr(expr, params) {
   return result;
 }
 
-// Tolerance check for the final numeric answer.
+// Tolerance check for the final numeric answer (doc §3.4).
 //   { type: "relative", value: 0.01 } → within 1% of |expected|
 //   { type: "absolute", value: 0.1 }  → within 0.1 flat
+// The comparison is inclusive with a float-safety epsilon:
+//   pass iff |student − expected| ≤ tolAbs + 1e-9 · max(1, |expected|)
+// The epsilon sits far below any precision a student can type, so grading
+// strictness is unchanged — it only stops IEEE754 artifacts from rejecting
+// mathematically-exact boundary answers (e.g. expected 29.6, absolute tol
+// 0.1, student 29.7: the float diff is 0.10000000000000142).
 export function checkAnswer(studentValue, expectedValue, tolerance) {
   const s = Number(studentValue);
   const e = Number(expectedValue);
   if (!Number.isFinite(s) || !Number.isFinite(e)) return false;
-  const diff = Math.abs(s - e);
-  if (tolerance?.type === "relative") return diff <= tolerance.value * Math.abs(e);
-  if (tolerance?.type === "absolute") return diff <= tolerance.value;
-  return false;
+  let tolAbs;
+  if (tolerance?.type === "relative") tolAbs = tolerance.value * Math.abs(e);
+  else if (tolerance?.type === "absolute") tolAbs = tolerance.value;
+  else return false;
+  const epsilon = 1e-9 * Math.max(1, Math.abs(e));
+  return Math.abs(s - e) <= tolAbs + epsilon;
 }

@@ -8,6 +8,7 @@ import TeacherPage from "./pages/TeacherPage";
 import StudentPage from "./pages/StudentPage";
 import JoinPage from "./pages/JoinPage";
 import SessionGate from "./components/SessionGate";
+import DevSteppedPage from "./pages/DevSteppedPage";
 
 // Bootstrap only: decides the role written to a brand-new /students doc on
 // first login, and must match isTeacher() in firestore.rules / storage.rules.
@@ -89,6 +90,12 @@ function App() {
             : <JoinPage />
           }
         />
+        {/* Dev-only harness (stepped solver): NODE_ENV is hardcoded to
+            "production" by CRA builds, so this route and its page are
+            dead-code-eliminated from production bundles entirely. */}
+        {process.env.NODE_ENV === "development" && (
+          <Route path="/dev/stepped" element={<DevSteppedPage />} />
+        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
