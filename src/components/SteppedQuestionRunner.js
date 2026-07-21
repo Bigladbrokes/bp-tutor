@@ -1,7 +1,7 @@
 import React, { useMemo, useReducer, useState } from "react";
 import KaTeXRenderer from "./KaTeXRenderer";
 import { useChipDrag } from "./useChipDrag";
-import { steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer, gradeGivens } from "../services/steppedParams";
+import { steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer, gradeGivens, gradeRearrange } from "../services/steppedParams";
 import {
   initialSteppedState, steppedReducer, STEP_PASSED, STEP_FAILED, DISMISS_FEEDBACK,
   shuffleEquationOptions, stepClearsOnRetry,
@@ -54,6 +54,18 @@ export default function SteppedQuestionRunner({ uid, question, sessionConfig }) 
           key={stepKey(state, step)}
           step={step}
           params={params}
+          disabled={state.status !== "inStep"}
+          onPass={() => dispatch({ type: STEP_PASSED })}
+          onFail={(payload) => dispatch({ type: STEP_FAILED, payload })}
+        />
+      )}
+
+      {step.stepType === "rearrange" && (
+        <StepRearrange
+          // rearrange clears all placed tiles on a same-step retry
+          // (stepClearsOnRetry: true → retriesUsed is in the key).
+          key={stepKey(state, step)}
+          step={step}
           disabled={state.status !== "inStep"}
           onPass={() => dispatch({ type: STEP_PASSED })}
           onFail={(payload) => dispatch({ type: STEP_FAILED, payload })}
@@ -228,6 +240,146 @@ function StepGivens({ step, params, disabled, onPass, onFail }) {
             style={{ ...s.unitChip, opacity: dnd.dragging === u ? 0.4 : 1 }}
           >
             {u}
+          </button>
+        ))}
+      </div>
+
+      <div style={s.btnRow}>
+        <button
+          onClick={submit}
+          disabled={!submittable}
+          style={{ ...s.submitBtn, opacity: submittable ? 1 : 0.4, cursor: submittable ? "pointer" : "not-allowed" }}
+        >
+          ตรวจคำตอบ ✓
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Tile label → KaTeX. Distractor tiles (vf, vf², ½) render too so a wrong
+// drop still looks like real math.
+const TILE_LATEX = {
+  vi: "v_i", "vi²": "v_i^2", vf: "v_f", "vf²": "v_f^2",
+  a: "a", d: "d", "2": "2", "½": "\\tfrac{1}{2}",
+};
+const tileLatex = (t) => TILE_LATEX[t] ?? t;
+
+// §3.3 rearrange step. The scaffold is composed at the React layout level, NOT
+// hosted inside KaTeX output: the √ radical is drawn with a glyph + a CSS
+// overline (border-top) over the radicand, and the drop-zone slots are real
+// React boxes laid out inline. This keeps the structure fixed while letting the
+// slots be live drop targets without measuring KaTeX geometry. Each tile and
+// each static symbol is still KaTeX-rendered. Reuses useChipDrag from step 4.
+function StepRearrange({ step, disabled, onPass, onFail }) {
+  const [assignments, setAssignments] = useState([]); // slot index -> tile label
+  const [graded, setGraded] = useState(null);
+
+  const dnd = useChipDrag({
+    onDrop: (slotId, tile) => {
+      if (disabled) return;
+      const i = Number(slotId);
+      setAssignments((prev) => {
+        const next = [...prev];
+        next[i] = tile;
+        return next;
+      });
+    },
+  });
+
+  const clearSlot = (i) =>
+    setAssignments((prev) => {
+      const next = [...prev];
+      next[i] = undefined;
+      return next;
+    });
+
+  const allFilled = step.slots.every((_, i) => assignments[i] != null);
+  const submittable = allFilled && !disabled;
+
+  const submit = () => {
+    const result = gradeRearrange(step.slots, assignments);
+    setGraded(result);
+    if (result.passed) {
+      onPass();
+    } else {
+      const fb = typeof step.feedback === "string" ? step.feedback : step.feedback?.[result.errorClass];
+      onFail({ errorClass: result.errorClass, feedback: fb });
+    }
+  };
+
+  const slotWrong = (i) => {
+    const r = graded?.slots.find((x) => x.index === i);
+    return r ? !r.ok : false;
+  };
+
+  // Split slots into the fixed-structure layout: slot 0 is the vi² term, the
+  // remaining group:"product" slots are the 2·a·d product (juxtaposed).
+  const productSlots = step.slots.map((s, i) => ({ ...s, i })).filter((s) => s.group === "product");
+  const firstSlot = step.slots.findIndex((s) => s.group !== "product");
+
+  const renderSlot = (i) => (
+    <span
+      {...dnd.slotProps(String(i))}
+      data-testid={`slot-${i}`}
+      style={{
+        ...s.scaffoldSlot,
+        borderColor: slotWrong(i) ? "#c62828" : dnd.dragging ? "#6a1b9a" : "#c9b6e0",
+        background: slotWrong(i) ? "#fce4ec" : dnd.dragging ? "#f3e5f5" : "#fff",
+      }}
+    >
+      {assignments[i] != null ? (
+        <button
+          type="button"
+          onClick={() => !disabled && clearSlot(i)}
+          aria-label={`clear-slot-${i}`}
+          title="แตะเพื่อลบ"
+          style={s.scaffoldTile}
+        >
+          <KaTeXRenderer text={`$${tileLatex(assignments[i])}$`} />
+        </button>
+      ) : (
+        <span style={s.scaffoldEmpty}>?</span>
+      )}
+    </span>
+  );
+
+  return (
+    <div style={s.card}>
+      <p style={s.computeLabel}>{step.instruction}</p>
+
+      <div style={s.rearrangeRef}>
+        <span style={s.rearrangeRefLabel}>สมการอ้างอิง</span>
+        <KaTeXRenderer text={`$${step.reference}$`} />
+      </div>
+
+      {/* CSS-composed scaffold: v_f = √‾( slot + slot·slot·slot ) */}
+      <div style={s.scaffold}>
+        <span style={s.scaffoldFixed}><KaTeXRenderer text={"$v_f =$"} /></span>
+        <span style={s.radicalSign}>√</span>
+        <span style={s.radicand}>
+          {firstSlot >= 0 && renderSlot(firstSlot)}
+          <span style={s.scaffoldFixed}><KaTeXRenderer text={"$+$"} /></span>
+          {productSlots.map((ps, k) => (
+            <React.Fragment key={ps.i}>
+              {k > 0 && <span style={s.productDot}>·</span>}
+              {renderSlot(ps.i)}
+            </React.Fragment>
+          ))}
+        </span>
+      </div>
+
+      <p style={s.paletteHint}>ลากตัวแปรด้านล่างไปวางในช่อง (มีตัวลวงปนอยู่)</p>
+      <div style={s.paletteRow}>
+        {step.palette.map((tile) => (
+          <button
+            key={tile}
+            type="button"
+            {...dnd.chipProps(tile, tile)}
+            aria-label={tile}
+            style={{ ...s.tileChip, opacity: dnd.dragging === tile ? 0.4 : 1 }}
+          >
+            <KaTeXRenderer text={`$${tileLatex(tile)}$`} />
           </button>
         ))}
       </div>
@@ -433,6 +585,43 @@ const s = {
     background: "#fff", border: "1.5px solid #ce93d8", borderRadius: "16px",
     fontSize: "15px", fontWeight: "700", color: "#6a1b9a",
     cursor: "grab", touchAction: "none", userSelect: "none",
+  },
+
+  rearrangeRef: {
+    display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+    padding: "10px 14px", marginBottom: "16px",
+    background: "#f3e5f5", border: "1px solid #e1bee7", borderRadius: "8px",
+  },
+  rearrangeRefLabel: { fontSize: "12px", fontWeight: "700", color: "#8e24aa", letterSpacing: "0.5px" },
+  scaffold: {
+    display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px",
+    padding: "18px 16px", marginBottom: "16px",
+    background: "#faf8fd", border: "1px solid #e8e0f0", borderRadius: "10px",
+    fontSize: "18px",
+  },
+  scaffoldFixed: { fontSize: "18px", color: "#1a1a1a" },
+  radicalSign: { fontSize: "30px", lineHeight: "1", color: "#4527a0", fontWeight: "400", marginRight: "-2px" },
+  radicand: {
+    display: "flex", alignItems: "center", gap: "6px",
+    borderTop: "2px solid #4527a0", paddingTop: "8px", paddingLeft: "4px",
+  },
+  productDot: { fontSize: "18px", color: "#7e57c2", padding: "0 1px" },
+  scaffoldSlot: {
+    minWidth: "48px", minHeight: "44px", padding: "4px 8px",
+    border: "2px dashed", borderRadius: "8px",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    transition: "border-color 0.15s, background 0.15s",
+  },
+  scaffoldEmpty: { fontSize: "18px", color: "#b39ddb", fontWeight: "700" },
+  scaffoldTile: {
+    background: "transparent", border: "none", padding: "2px 4px",
+    cursor: "pointer", fontSize: "17px", color: "#4527a0",
+  },
+  tileChip: {
+    minWidth: "50px", minHeight: "46px", padding: "6px 14px",
+    background: "#fff", border: "1.5px solid #ce93d8", borderRadius: "10px",
+    cursor: "grab", touchAction: "none", userSelect: "none",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
   },
 
   eqList: { display: "flex", flexDirection: "column", gap: "10px", marginBottom: "6px" },

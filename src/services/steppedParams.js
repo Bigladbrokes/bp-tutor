@@ -222,3 +222,60 @@ export function gradeGivens(fields, entries, params) {
   else if (anyWrongUnit) errorClass = "givens.wrongUnit";
   return { passed: results.every((r) => r.ok), errorClass, fields: results };
 }
+
+// Per-slot grading for a `rearrange` step (doc §3.3). `assignments[i]` is the
+// tile label the student dropped into slot i (or null/undefined if empty).
+//
+// A plain slot is correct iff its tile is a member of slot.accepts. A
+// `group: "product"` slot (the 2·a·d slots) is graded as a SET across the
+// group: every group slot must hold a DISTINCT member, so the group as a
+// whole is exactly {2, a, d} once each — order among the group is irrelevant,
+// and a duplicate (which necessarily leaves a required member missing) fails.
+//
+// Returns:
+//   passed     — every slot correct
+//   errorClass — "rearrange.wrongTile" if any tile is a non-member or a
+//                required fixed slot is empty (a genuinely wrong placement,
+//                the more fundamental read → reported first); otherwise
+//                "rearrange.incompleteProduct" when the product group's tiles
+//                are all valid members but the group isn't a complete,
+//                duplicate-free set; otherwise null
+//   slots      — per-slot { index, ok } so the UI can red-X only wrong slots
+export function gradeRearrange(slots, assignments) {
+  const a = assignments || [];
+  const list = slots || [];
+
+  // Count each tile within its product group, to detect duplicates as a set.
+  const groupCounts = {};
+  list.forEach((slot, i) => {
+    if (!slot.group) return;
+    const tile = a[i];
+    if (tile == null) return;
+    const counts = groupCounts[slot.group] || (groupCounts[slot.group] = {});
+    counts[tile] = (counts[tile] || 0) + 1;
+  });
+
+  const results = list.map((slot, i) => {
+    const tile = a[i];
+    const isMember = tile != null && slot.accepts.includes(tile);
+    const ok = slot.group
+      ? isMember && groupCounts[slot.group][tile] === 1 // member AND not duplicated
+      : isMember;
+    return { index: i, ok };
+  });
+
+  const passed = results.every((r) => r.ok);
+
+  let errorClass = null;
+  if (!passed) {
+    const wrongTile = list.some((slot, i) => {
+      const tile = a[i];
+      if (tile != null && !slot.accepts.includes(tile)) return true; // wrong symbol placed
+      if (!slot.group && tile == null) return true;                  // required fixed slot empty
+      return false;
+    });
+    errorClass = wrongTile ? "rearrange.wrongTile" : "rearrange.incompleteProduct";
+  }
+
+  return { passed, errorClass, slots: results };
+}

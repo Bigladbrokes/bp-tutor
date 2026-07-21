@@ -75,6 +75,31 @@ const GIVENS_STEP = {
   },
 };
 
+// §3.3 rearrange step: drag tiles into a fixed radical scaffold. The palette
+// carries distractors (vf, vf², ½, unsquared vi). slot 0 is the vi² term; the
+// three group:"product" slots are 2·a·d (any order valid, no duplicates).
+const REARRANGE_STEP = {
+  stepType: "rearrange",
+  reference: "v_f^2 = v_i^2 + 2ad",
+  instruction: "จัดรูปสมการเพื่อหา v_f แล้วลากตัวแปรมาวางในช่องให้ถูกต้อง",
+  // Documented scaffold shape; the component composes the radical + slots
+  // itself rather than hosting drop targets inside KaTeX.
+  scaffold: "v_f = \\sqrt{ \\square + \\square\\square\\square }",
+  slots: [
+    { accepts: ["vi²"] },
+    { accepts: ["2", "a", "d"], group: "product" },
+    { accepts: ["2", "a", "d"], group: "product" },
+    { accepts: ["2", "a", "d"], group: "product" },
+  ],
+  palette: ["vi", "vi²", "vf", "vf²", "a", "d", "2", "½"],
+  feedback: {
+    "rearrange.wrongTile":
+      "ดูสมการอ้างอิงอีกครั้ง — ตัวแปรตัวไหนกำลังสอง ตัวไหนไม่ได้กำลังสอง และ ½ มาจากสมการอื่น",
+    "rearrange.incompleteProduct":
+      "ในเครื่องหมายรากต้องมีพจน์ 2·a·d ครบทั้งสาม (2, a และ d) อย่างละหนึ่ง ไม่ซ้ำและไม่ขาด",
+  },
+};
+
 // Fixture 1: [compute] only (build step 2).
 const FIXTURE_COMPUTE_ONLY = {
   id: "q_phys_kin_fv_001",
@@ -100,14 +125,24 @@ const FIXTURE_FULL_FLOW = {
   steps: [GIVENS_STEP, EQUATION_STEP, COMPUTE_STEP],
 };
 
+// Fixture 4: [givens, equationSelect, rearrange, compute] — the full 4-step
+// observed flow (build step 5).
+const FIXTURE_FULL_SOLVE = {
+  id: "q_phys_kin_fv_004",
+  type: "stepped",
+  template: KINEMATICS_TEMPLATE,
+  steps: [GIVENS_STEP, EQUATION_STEP, REARRANGE_STEP, COMPUTE_STEP],
+};
+
 const FIXTURES = {
   computeOnly: FIXTURE_COMPUTE_ONLY,
   eqThenCompute: FIXTURE_EQ_THEN_COMPUTE,
   fullFlow: FIXTURE_FULL_FLOW,
+  fullSolve: FIXTURE_FULL_SOLVE,
 };
 
 // Flip this one line to switch fixtures:
-const ACTIVE_FIXTURE = FIXTURES.fullFlow;
+const ACTIVE_FIXTURE = FIXTURES.fullSolve;
 
 export default function DevSteppedPage() {
   return (

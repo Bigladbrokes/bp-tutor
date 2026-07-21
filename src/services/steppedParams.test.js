@@ -1,5 +1,5 @@
 import {
-  steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer, gradeGivens,
+  steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer, gradeGivens, gradeRearrange,
 } from "./steppedParams";
 
 // Fixture mirrors the reference app's "Accelerated Motion Finding Final
@@ -252,4 +252,65 @@ test("gradeGivens: empty value or missing unit is not correct", () => {
   expect(bym.d.valueOk).toBe(false);
   expect(bym.vi.unitOk).toBe(false);
   expect(r.errorClass).toBe("givens.wrongValue"); // empty value counts as wrong value first
+});
+
+// ─── gradeRearrange (build step 5) ────────────────────────────────────────────
+
+// Scaffold: v_f = √( [vi²] + [2][a][d] ). Slot 0 fixed; slots 1-3 the product.
+const REARR_SLOTS = [
+  { accepts: ["vi²"] },
+  { accepts: ["2", "a", "d"], group: "product" },
+  { accepts: ["2", "a", "d"], group: "product" },
+  { accepts: ["2", "a", "d"], group: "product" },
+];
+
+test("gradeRearrange: correct assignment passes with no error class", () => {
+  const r = gradeRearrange(REARR_SLOTS, ["vi²", "2", "a", "d"]);
+  expect(r.passed).toBe(true);
+  expect(r.errorClass).toBeNull();
+  expect(r.slots.every((x) => x.ok)).toBe(true);
+});
+
+test("gradeRearrange: single-slot membership — wrong tile in the fixed slot fails", () => {
+  const r = gradeRearrange(REARR_SLOTS, ["vf²", "2", "a", "d"]); // vf² is a distractor
+  expect(r.passed).toBe(false);
+  expect(r.errorClass).toBe("rearrange.wrongTile");
+  expect(r.slots.find((x) => x.index === 0).ok).toBe(false);
+  expect(r.slots.find((x) => x.index === 1).ok).toBe(true); // product still fine
+});
+
+test("gradeRearrange: product group validates as a SET — reordered 2·a·d passes", () => {
+  for (const order of [["d", "a", "2"], ["a", "2", "d"], ["2", "d", "a"]]) {
+    const r = gradeRearrange(REARR_SLOTS, ["vi²", ...order]);
+    expect(r.passed).toBe(true);
+  }
+});
+
+test("gradeRearrange: a duplicate in the product group fails as incompleteProduct", () => {
+  const r = gradeRearrange(REARR_SLOTS, ["vi²", "a", "a", "d"]); // 2 missing, a twice
+  expect(r.passed).toBe(false);
+  expect(r.errorClass).toBe("rearrange.incompleteProduct");
+  // both duplicate slots flagged, the unique 'd' left ok
+  expect(r.slots.find((x) => x.index === 1).ok).toBe(false);
+  expect(r.slots.find((x) => x.index === 2).ok).toBe(false);
+  expect(r.slots.find((x) => x.index === 3).ok).toBe(true);
+});
+
+test("gradeRearrange: an empty product slot → incompleteProduct (members otherwise valid)", () => {
+  const r = gradeRearrange(REARR_SLOTS, ["vi²", "2", "a", undefined]);
+  expect(r.passed).toBe(false);
+  expect(r.errorClass).toBe("rearrange.incompleteProduct");
+});
+
+test("gradeRearrange: a distractor tile in a product slot → wrongTile (outranks incompleteness)", () => {
+  const r = gradeRearrange(REARR_SLOTS, ["vi²", "2", "a", "½"]); // ½ not in accepts
+  expect(r.passed).toBe(false);
+  expect(r.errorClass).toBe("rearrange.wrongTile");
+  expect(r.slots.find((x) => x.index === 3).ok).toBe(false);
+});
+
+test("gradeRearrange: an empty fixed slot → wrongTile", () => {
+  const r = gradeRearrange(REARR_SLOTS, [undefined, "2", "a", "d"]);
+  expect(r.passed).toBe(false);
+  expect(r.errorClass).toBe("rearrange.wrongTile");
 });

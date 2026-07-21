@@ -225,3 +225,100 @@ test("stepRetry: a givens retry clears both typed values and assigned units", ()
   expect(screen.getByTestId("unit-slot-d")).toHaveTextContent("ลากหน่วยมาวาง");
   expect(screen.queryByLabelText("clear-unit-d")).toBeNull();
 });
+
+// ─── rearrange step (build step 5) ────────────────────────────────────────────
+const REARRANGE_FIXTURE = {
+  id: "q_test_rearrange",
+  type: "stepped",
+  template: {
+    params: { x: { min: 1, max: 1, step: 1, dp: 0, unit: "u" } },
+    problemText: "x={x}",
+    unknown: { symbol: "v_f", unit: "m/s" },
+    answerExpr: "x",
+    tolerance: { type: "absolute", value: 0.5 },
+  },
+  steps: [
+    {
+      stepType: "rearrange",
+      reference: "v_f^2 = v_i^2 + 2ad",
+      instruction: "จัดรูป",
+      slots: [
+        { accepts: ["vi²"] },
+        { accepts: ["2", "a", "d"], group: "product" },
+        { accepts: ["2", "a", "d"], group: "product" },
+        { accepts: ["2", "a", "d"], group: "product" },
+      ],
+      palette: ["vi", "vi²", "vf", "vf²", "a", "d", "2", "½"],
+      feedback: { "rearrange.wrongTile": "ตัวแปรผิด", "rearrange.incompleteProduct": "พจน์ 2ad ไม่ครบ" },
+    },
+    { stepType: "compute", answerField: { symbol: "vf", unitProvided: "m/s" }, errorClass: "compute.wrongValue", feedback: "x" },
+  ],
+};
+
+const renderRearrange = (policy = "strict", retriesPerStep = 1) =>
+  render(
+    <SteppedQuestionRunner
+      uid="test-user"
+      question={REARRANGE_FIXTURE}
+      sessionConfig={{ stepped: { restartPolicy: policy, retriesPerStep } }}
+    />
+  );
+
+const dragTile = (tile, slotIdx) => {
+  const chip = screen.getByRole("button", { name: tile });
+  const slot = screen.getByTestId(`slot-${slotIdx}`);
+  const dt = makeDT();
+  fireEvent.dragStart(chip, { dataTransfer: dt });
+  fireEvent.drop(slot, { dataTransfer: dt });
+};
+const fillCorrectRearrange = () => {
+  dragTile("vi²", 0); dragTile("2", 1); dragTile("a", 2); dragTile("d", 3);
+};
+const submitRearrange = () => fireEvent.click(screen.getByRole("button", { name: /ตรวจคำตอบ/ }));
+
+test("rearrange: dragging a tile fills a slot; tapping the tile clears it", () => {
+  renderRearrange();
+  expect(screen.getByTestId("slot-0")).toHaveTextContent("?");
+  dragTile("vi²", 0);
+  expect(screen.queryByLabelText("clear-slot-0")).not.toBeNull();
+  fireEvent.click(screen.getByLabelText("clear-slot-0"));
+  expect(screen.getByTestId("slot-0")).toHaveTextContent("?");
+});
+
+test("rearrange: correct tiles complete the step (product in order)", () => {
+  renderRearrange();
+  expect(screen.getByText("Step 1/2")).toBeInTheDocument();
+  fillCorrectRearrange();
+  submitRearrange();
+  expect(screen.getByText("Step 2/2")).toBeInTheDocument();
+});
+
+test("rearrange: the 2·a·d product accepts a reordered drop", () => {
+  renderRearrange();
+  dragTile("vi²", 0); dragTile("d", 1); dragTile("a", 2); dragTile("2", 3);
+  submitRearrange();
+  expect(screen.getByText("Step 2/2")).toBeInTheDocument();
+});
+
+test("rearrange: a distractor in the fixed slot shows the wrongTile feedback", () => {
+  renderRearrange();
+  dragTile("vf²", 0); dragTile("2", 1); dragTile("a", 2); dragTile("d", 3);
+  submitRearrange();
+  expect(screen.getByText("ตัวแปรผิด")).toBeInTheDocument();
+});
+
+test("rearrange: a duplicate in the product shows the incompleteProduct feedback", () => {
+  renderRearrange();
+  dragTile("vi²", 0); dragTile("a", 1); dragTile("a", 2); dragTile("d", 3);
+  submitRearrange();
+  expect(screen.getByText("พจน์ 2ad ไม่ครบ")).toBeInTheDocument();
+});
+
+test("stepRetry: a rearrange retry clears all placed tiles", () => {
+  renderRearrange("stepRetry");
+  dragTile("vf²", 0); dragTile("2", 1); dragTile("a", 2); dragTile("d", 3); // wrong → fail
+  submitRearrange();
+  fireEvent.click(screen.getByRole("button", { name: /ลองอีกครั้ง/ }));
+  [0, 1, 2, 3].forEach((i) => expect(screen.getByTestId(`slot-${i}`)).toHaveTextContent("?"));
+  expect(screen.queryByLabelText("clear-slot-0")).toBeNull();
+});
