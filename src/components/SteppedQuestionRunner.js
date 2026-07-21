@@ -1,7 +1,10 @@
 import React, { useMemo, useReducer, useState } from "react";
 import KaTeXRenderer from "./KaTeXRenderer";
 import { steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer } from "../services/steppedParams";
-import { initialSteppedState, steppedReducer, STEP_PASSED, STEP_FAILED, DISMISS_FEEDBACK } from "../services/steppedRunner";
+import {
+  initialSteppedState, steppedReducer, STEP_PASSED, STEP_FAILED, DISMISS_FEEDBACK,
+  shuffleEquationOptions, stepClearsOnRetry,
+} from "../services/steppedRunner";
 
 // Thin UI over the pure state machine (doc §5). Owns the reducer; params are
 // derived from (uid, questionId, attemptNo), so a full restart reseeds the
@@ -44,9 +47,10 @@ export default function SteppedQuestionRunner({ uid, question, sessionConfig }) 
 
       {step.stepType === "compute" && (
         <StepCompute
-          // Remount on restart (fresh input); retain typed value across a
-          // same-step retry so the student can edit their wrong answer.
-          key={`${state.attemptNo}-${state.stepIndex}`}
+          // Remount on restart (fresh input). compute keeps the typed value
+          // across a same-step retry (stepClearsOnRetry: false) so the
+          // student can edit their wrong answer.
+          key={stepKey(state, step)}
           step={step}
           unknown={question.template.unknown}
           disabled={state.status !== "inStep"}
@@ -58,6 +62,22 @@ export default function SteppedQuestionRunner({ uid, question, sessionConfig }) 
         />
       )}
 
+      {step.stepType === "equationSelect" && (
+        <StepEquationSelect
+          // equationSelect clears the selection on a same-step retry
+          // (stepClearsOnRetry: true → retriesUsed is part of the key, so
+          // dismissing a retry remounts with nothing selected).
+          key={stepKey(state, step)}
+          step={step}
+          uid={uid}
+          questionId={question.id}
+          attemptNo={state.attemptNo}
+          disabled={state.status !== "inStep"}
+          onPass={() => dispatch({ type: STEP_PASSED })}
+          onFail={(payload) => dispatch({ type: STEP_FAILED, payload })}
+        />
+      )}
+
       {state.status === "showingFeedback" && (
         <IncorrectPanel
           feedback={state.feedback}
@@ -66,6 +86,14 @@ export default function SteppedQuestionRunner({ uid, question, sessionConfig }) 
       )}
     </div>
   );
+}
+
+// Remount key for the current step component. A full restart (attemptNo+1)
+// always remounts. Whether a same-step retry also remounts (clearing local
+// input state) is a per-step-type decision — see stepClearsOnRetry.
+function stepKey(state, step) {
+  const base = `${state.attemptNo}-${state.stepIndex}`;
+  return stepClearsOnRetry(step.stepType) ? `${base}-${state.retriesUsed}` : base;
 }
 
 function StepHeader({ stepIndex, totalSteps, problemText }) {
@@ -106,6 +134,75 @@ function StepCompute({ step, unknown, disabled, onSubmit }) {
           onClick={() => onSubmit(value)}
           disabled={!submittable}
           style={{ ...s.submitBtn, opacity: submittable ? 1 : 0.4, cursor: submittable ? "pointer" : "not-allowed" }}
+        >
+          ตรวจคำตอบ ✓
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// §3.2 equation selection: options shuffled deterministically per
+// (student, question, attempt), single-select, per-distractor feedback. The
+// wrong pick stays visible with a red ✗ while the feedback panel is up
+// (observed behavior in the reference app).
+function StepEquationSelect({ step, uid, questionId, attemptNo, disabled, onPass, onFail }) {
+  const [selected, setSelected] = useState(null);   // originalIndex
+  const [failedPick, setFailedPick] = useState(null);
+
+  const options = useMemo(
+    () => shuffleEquationOptions(step.options, uid, questionId, attemptNo),
+    [step, uid, questionId, attemptNo]
+  );
+
+  const submit = () => {
+    const opt = options.find((o) => o.originalIndex === selected);
+    if (!opt) return;
+    if (opt.correct) {
+      onPass();
+    } else {
+      setFailedPick(opt.originalIndex);
+      onFail({ errorClass: opt.errorClass, feedback: opt.feedback });
+    }
+  };
+
+  return (
+    <div style={s.card}>
+      <p style={s.computeLabel}>{step.prompt}</p>
+      <div style={s.eqList} role="radiogroup">
+        {options.map((opt) => {
+          const isSelected = selected === opt.originalIndex;
+          const isFailed = failedPick === opt.originalIndex;
+          return (
+            <div
+              key={opt.originalIndex}
+              role="radio"
+              aria-checked={isSelected}
+              aria-label={opt.latex}
+              onClick={() => !disabled && setSelected(opt.originalIndex)}
+              style={{
+                ...s.eqOption,
+                borderColor: isFailed ? "#c62828" : isSelected ? "#6a1b9a" : "#e0e0e0",
+                background: isFailed ? "#fce4ec" : isSelected ? "#f3e5f5" : "#fff",
+                cursor: disabled ? "default" : "pointer",
+              }}
+            >
+              <span style={{ ...s.eqDot, borderColor: isSelected ? "#6a1b9a" : "#bbb", background: isSelected ? "#6a1b9a" : "transparent" }} />
+              <span style={s.eqLatex}><KaTeXRenderer text={`$${opt.latex}$`} /></span>
+              {isFailed && <span style={s.eqFailMark}>✗</span>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={s.btnRow}>
+        <button
+          onClick={submit}
+          disabled={selected === null || disabled}
+          style={{
+            ...s.submitBtn,
+            opacity: selected === null || disabled ? 0.4 : 1,
+            cursor: selected === null || disabled ? "not-allowed" : "pointer",
+          }}
         >
           ตรวจคำตอบ ✓
         </button>
@@ -162,6 +259,19 @@ const s = {
     padding: "11px 28px", background: "#6a1b9a", color: "#fff", border: "none",
     borderRadius: "8px", fontSize: "15px", fontWeight: "700",
   },
+
+  eqList: { display: "flex", flexDirection: "column", gap: "10px", marginBottom: "6px" },
+  eqOption: {
+    display: "flex", alignItems: "center", gap: "12px",
+    padding: "14px 16px", border: "2px solid", borderRadius: "10px",
+    fontSize: "16px", transition: "border-color 0.15s, background 0.15s",
+  },
+  eqDot: {
+    width: "18px", height: "18px", borderRadius: "50%", border: "2px solid",
+    flexShrink: 0, transition: "background 0.15s, border-color 0.15s",
+  },
+  eqLatex: { flex: 1 },
+  eqFailMark: { color: "#c62828", fontSize: "20px", fontWeight: "800", flexShrink: 0 },
 
   panelOverlay: {
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",

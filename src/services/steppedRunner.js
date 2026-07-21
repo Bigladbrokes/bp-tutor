@@ -14,9 +14,32 @@
 //                 restart as above.
 // retriesUsed resets on step pass and on every full restart.
 
+import { hashSeed, mulberry32 } from "./shuffle";
+
 export const STEP_PASSED = "STEP_PASSED";
 export const STEP_FAILED = "STEP_FAILED";
 export const DISMISS_FEEDBACK = "DISMISS_FEEDBACK";
+
+// Deterministic per-student option order for an equationSelect step (doc
+// §3.2, same mechanics as the MC shuffle). The ":eq:" segment keeps this
+// random stream independent of the params seed for the same attempt, and
+// attemptNo in the seed reshuffles the options on every full restart.
+export function shuffleEquationOptions(options, uid, questionId, attemptNo) {
+  const items = (options || []).map((opt, originalIndex) => ({ ...opt, originalIndex }));
+  const rand = mulberry32(hashSeed(`${uid}:${questionId}:eq:${attemptNo}`));
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+
+// Per-step-type retry behavior: on a same-step retry, select/drag steps CLEAR
+// the student's work (a wrong pick left highlighted anchors them to the
+// mistake), while numeric entry keeps the typed value for editing. rearrange
+// (build step 5) inherits the select/drag behavior.
+const CLEAR_ON_RETRY = { equationSelect: true, rearrange: true, compute: false };
+export const stepClearsOnRetry = (stepType) => CLEAR_ON_RETRY[stepType] ?? false;
 
 // config: { totalSteps, restartPolicy: "strict"|"stepRetry", retriesPerStep }
 // Carried inside the state so the reducer stays a pure 2-arg (state, action).
