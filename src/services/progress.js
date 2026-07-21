@@ -163,3 +163,98 @@ export function chapterStats(questions, results) {
   );
   return out;
 }
+
+// ─── Stepped-solver analytics (doc §4, §4.2) ──────────────────────────────────
+// Pure aggregations over stepped-question result documents. One document per
+// (session, student, question); the shape these functions consume (§4):
+//
+//   {
+//     sessionId, uid, questionId, type: "stepped",
+//     attempts: [
+//       { n, failedStepIndex, errorClass, wrongElement?, tMs? }, // a failed attempt
+//       { n, completed: true, tMs? },                            // the completing attempt
+//     ],
+//     completedOnAttempt, totalTimeMs, tokensAwarded,
+//   }
+//
+// Only attempts[].errorClass and attempts[].failedStepIndex are read here. A
+// document without an attempts[] array (e.g. a non-stepped result) contributes
+// nothing, so these are safe to run over a mixed result set. Part B (Firestore
+// writing) just has to produce documents in this shape.
+
+// Solving-order rank for the §4.1 taxonomy — the weaknessProfile tiebreak:
+// when two error classes tie on count, the one earlier in the solve (the more
+// fundamental weakness) wins. Classes outside the taxonomy rank last.
+const ERROR_CLASS_ORDER = [
+  "givens.wrongValue", "givens.wrongUnit",
+  "equation.requiresTime", "equation.missingUnknown", "equation.other",
+  "rearrange.wrongTile", "rearrange.incompleteProduct",
+  "compute.wrongValue",
+];
+const classRank = (ec) => {
+  const i = ERROR_CLASS_ORDER.indexOf(ec);
+  return i === -1 ? ERROR_CLASS_ORDER.length : i;
+};
+
+// Count each error class across every failed attempt in a result set.
+//   results: array of result documents → { [errorClass]: count }
+// Completing attempts (no errorClass) are skipped.
+export function aggregateErrorClasses(results) {
+  const counts = {};
+  for (const doc of results || []) {
+    for (const a of doc?.attempts || []) {
+      if (a && a.errorClass) counts[a.errorClass] = (counts[a.errorClass] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+// The dominant failure for ONE student across their result documents.
+//   studentResults: array of that student's result docs
+//   → null if they never failed, else
+//     { errorClass, stepType, count, totalFailures }
+// stepType is the taxonomy namespace (e.g. "rearrange.wrongTile" → "rearrange"),
+// so the result directly names which step is the student's weakness. Ties on
+// count are broken by ERROR_CLASS_ORDER (earlier solving stage wins).
+export function weaknessProfile(studentResults) {
+  const counts = aggregateErrorClasses(studentResults);
+  const classes = Object.keys(counts);
+  if (classes.length === 0) return null;
+
+  const totalFailures = classes.reduce((sum, ec) => sum + counts[ec], 0);
+  classes.sort((a, b) => counts[b] - counts[a] || classRank(a) - classRank(b));
+  const errorClass = classes[0];
+  return {
+    errorClass,
+    stepType: errorClass.split(".")[0],
+    count: counts[errorClass],
+    totalFailures,
+  };
+}
+
+// Per-step failure rate across a class for one stepped question.
+//   sessionResults: one result doc per student, all for the same question
+//   steps: the question's steps array (drives the entry count + stepType labels)
+// A student "failed at step i" if ANY of their attempts has failedStepIndex === i
+// (counted once per student, not per attempt). failPct denominator is the number
+// of students with a result document — the honest base, since a student with no
+// document can't be measured.
+//   → array aligned with steps: { stepIndex, stepType, failCount, total, failPct }
+export function classHeatmap(sessionResults, steps) {
+  const docs = (sessionResults || []).filter((d) => Array.isArray(d?.attempts));
+  const total = docs.length;
+
+  return (steps || []).map((step, i) => {
+    let failCount = 0;
+    for (const doc of docs) {
+      if (doc.attempts.some((a) => a && a.failedStepIndex === i)) failCount++;
+    }
+    return {
+      stepIndex: i,
+      stepType: step?.stepType ?? null,
+      failCount,
+      total,
+      failPct: total === 0 ? 0 : Math.round((failCount / total) * 100),
+    };
+  });
+}

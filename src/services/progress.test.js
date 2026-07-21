@@ -1,4 +1,7 @@
-import { computeStreak, chapterStats, UNCATEGORIZED } from "./progress";
+import {
+  computeStreak, chapterStats, UNCATEGORIZED,
+  aggregateErrorClasses, weaknessProfile, classHeatmap,
+} from "./progress";
 
 // ─── Streak ───────────────────────────────────────────────────────────────────
 // Sessions opened at t=1000 (S1), 2000 (S2), 3000 (S3), one question each.
@@ -213,4 +216,120 @@ test("delta still works when the fallback applies", () => {
   // Excluding the chapter's newest session (Y2) falls back to run X2 (correct)
   expect(c.prevPct).toBe(100);
   expect(c.delta).toBe(-100);
+});
+
+// ─── Stepped-solver analytics (build step 6 part A) ───────────────────────────
+// Result-document helpers matching the §4 schema.
+const fail = (n, failedStepIndex, errorClass) => ({ n, failedStepIndex, errorClass });
+const done = (n) => ({ n, completed: true });
+const doc = (uid, questionId, attempts) => ({ sessionId: "S1", uid, questionId, type: "stepped", attempts });
+
+// A 4-step stepped question: givens, equationSelect, rearrange, compute.
+const STEPS = [
+  { stepType: "givens" }, { stepType: "equationSelect" },
+  { stepType: "rearrange" }, { stepType: "compute" },
+];
+
+// ── aggregateErrorClasses ──
+test("aggregateErrorClasses: empty input → {}", () => {
+  expect(aggregateErrorClasses([])).toEqual({});
+  expect(aggregateErrorClasses(undefined)).toEqual({});
+});
+
+test("aggregateErrorClasses: counts each failed attempt, skips completions", () => {
+  const results = [
+    doc("u1", "q1", [fail(1, 0, "givens.wrongUnit"), fail(2, 2, "rearrange.wrongTile"), done(3)]),
+  ];
+  expect(aggregateErrorClasses(results)).toEqual({
+    "givens.wrongUnit": 1,
+    "rearrange.wrongTile": 1,
+  });
+});
+
+test("aggregateErrorClasses: sums across multiple students and questions", () => {
+  const results = [
+    doc("u1", "q1", [fail(1, 0, "givens.wrongUnit"), done(2)]),
+    doc("u2", "q1", [fail(1, 0, "givens.wrongUnit"), fail(2, 0, "givens.wrongValue"), done(3)]),
+    doc("u2", "q2", [fail(1, 2, "rearrange.wrongTile"), done(2)]),
+  ];
+  expect(aggregateErrorClasses(results)).toEqual({
+    "givens.wrongUnit": 2,
+    "givens.wrongValue": 1,
+    "rearrange.wrongTile": 1,
+  });
+});
+
+test("aggregateErrorClasses: a doc with no attempts[] contributes nothing", () => {
+  const results = [
+    { sessionId: "S1", uid: "u1", questionId: "qMC", mode: "guided", correct: true }, // non-stepped
+    doc("u1", "q1", [fail(1, 3, "compute.wrongValue"), done(2)]),
+  ];
+  expect(aggregateErrorClasses(results)).toEqual({ "compute.wrongValue": 1 });
+});
+
+// ── weaknessProfile ──
+test("weaknessProfile: a student who never fails → null", () => {
+  expect(weaknessProfile([doc("u1", "q1", [done(1)])])).toBeNull();
+  expect(weaknessProfile([])).toBeNull();
+});
+
+test("weaknessProfile: picks the most frequent error class with its step type", () => {
+  const student = [
+    doc("u1", "q1", [fail(1, 2, "rearrange.wrongTile"), fail(2, 2, "rearrange.wrongTile"), done(3)]),
+    doc("u1", "q2", [fail(1, 0, "givens.wrongUnit"), done(2)]),
+  ];
+  expect(weaknessProfile(student)).toEqual({
+    errorClass: "rearrange.wrongTile",
+    stepType: "rearrange",
+    count: 2,
+    totalFailures: 3,
+  });
+});
+
+test("weaknessProfile: a tie is broken by solving order (earlier stage wins)", () => {
+  // givens.wrongUnit and compute.wrongValue both appear twice; givens is earlier
+  // in the solve, so it is the more fundamental weakness and wins the tie.
+  const student = [
+    doc("u1", "q1", [fail(1, 0, "givens.wrongUnit"), fail(2, 3, "compute.wrongValue"), done(3)]),
+    doc("u1", "q2", [fail(1, 0, "givens.wrongUnit"), fail(2, 3, "compute.wrongValue"), done(3)]),
+  ];
+  const p = weaknessProfile(student);
+  expect(p.errorClass).toBe("givens.wrongUnit");
+  expect(p.count).toBe(2);
+  expect(p.totalFailures).toBe(4);
+});
+
+// ── classHeatmap ──
+test("classHeatmap: empty class → 0% at every step", () => {
+  expect(classHeatmap([], STEPS)).toEqual([
+    { stepIndex: 0, stepType: "givens", failCount: 0, total: 0, failPct: 0 },
+    { stepIndex: 1, stepType: "equationSelect", failCount: 0, total: 0, failPct: 0 },
+    { stepIndex: 2, stepType: "rearrange", failCount: 0, total: 0, failPct: 0 },
+    { stepIndex: 3, stepType: "compute", failCount: 0, total: 0, failPct: 0 },
+  ]);
+});
+
+test("classHeatmap: per-step failure % over a class, counting each student once", () => {
+  // 4 students. Step 1 (equationSelect): u1, u2, u3 failed → 75%.
+  // Step 2 (rearrange): u4 only → 25%. u1 failed step 1 twice but counts once.
+  const cls = [
+    doc("u1", "q1", [fail(1, 1, "equation.requiresTime"), fail(2, 1, "equation.other"), done(3)]),
+    doc("u2", "q1", [fail(1, 1, "equation.missingUnknown"), done(2)]),
+    doc("u3", "q1", [fail(1, 1, "equation.requiresTime"), done(2)]),
+    doc("u4", "q1", [fail(1, 2, "rearrange.wrongTile"), done(2)]),
+  ];
+  const heat = classHeatmap(cls, STEPS);
+  expect(heat.map((h) => h.failPct)).toEqual([0, 75, 25, 0]);
+  expect(heat[1]).toEqual({ stepIndex: 1, stepType: "equationSelect", failCount: 3, total: 4, failPct: 75 });
+});
+
+test("classHeatmap: different students fail at different steps", () => {
+  const cls = [
+    doc("u1", "q1", [fail(1, 0, "givens.wrongValue"), done(2)]),
+    doc("u2", "q1", [fail(1, 3, "compute.wrongValue"), done(2)]),
+    doc("u3", "q1", [done(1)]), // never failed
+  ];
+  const heat = classHeatmap(cls, STEPS);
+  expect(heat.map((h) => h.failPct)).toEqual([33, 0, 0, 33]);
+  expect(heat[0].total).toBe(3);
 });
