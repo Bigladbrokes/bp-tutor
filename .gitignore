@@ -32,3 +32,9 @@ yarn-error.log*
 
 # local video reference material (large, not for the repo)
 /videos
+
+# Firebase emulator artifacts (from `npm run test:rules`)
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+firestore-tests/**/*-debug.log

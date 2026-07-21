@@ -113,6 +113,47 @@ export const saveResultWithTokens = (user, result, amount, meta = {}) =>
     return { duplicate: false };
   });
 
+// Deterministic ID for a stepped-question result: one doc per (session,
+// student, question) — 3 segments, no per-row suffix, because the whole
+// attempt history lives in attempts[]. firestore.rules checks segment [1] is
+// the writer's uid (same pattern as resultRowId), and the 3-segment length is
+// what its stepped-shape rule keys on.
+export const steppedResultId = (sessionId, uid, questionId) =>
+  `${sessionId}_${uid}_${questionId}`;
+
+// Save a completed stepped question's result in one transaction, create-only
+// like saveResultWithTokens: if the doc already exists (replay from another
+// tab/device), nothing is written — the create-only rule makes rewriting to
+// farm tokens impossible. The document is the §4 shape progress.js analytics
+// consume, written ONCE at completion carrying the full attempts[] history.
+//
+// TODO(B2): token AWARD logic. This build (B1) writes tokensAwarded: 0 and
+// touches no balance or ledger. B2 will, inside THIS transaction, credit the
+// flat completion award (doc §7 decision 2) via increment() on
+// students/{uid} + a tokenHistory "question" entry — exactly like
+// saveResultWithTokens — and must compute the amount server-side rather than
+// trusting any client-supplied tokensAwarded.
+export const saveSteppedResult = (user, { sessionId, questionId, attempts, completedOnAttempt, totalTimeMs }) =>
+  runTransaction(db, async (t) => {
+    const ref = doc(db, "results", steppedResultId(sessionId, user.uid, questionId));
+    const existing = await t.get(ref);
+    if (existing.exists()) return { duplicate: true };
+    t.set(ref, {
+      sessionId,
+      questionId,
+      studentUid: user.uid,            // required by the results create rule
+      studentEmail: user.email ?? "",  // required by the results create rule
+      studentName: user.displayName ?? "",
+      type: "stepped",
+      attempts: attempts ?? [],
+      completedOnAttempt: completedOnAttempt ?? null,
+      totalTimeMs: totalTimeMs ?? null,
+      tokensAwarded: 0,                // TODO(B2): real flat award at completion
+      timestamp: serverTimestamp(),
+    });
+    return { duplicate: false };
+  });
+
 export const giveBonusTokens = (student, amount, reason, teacherUid) => {
   const batch = writeBatch(db);
   batch.set(doc(db, "students", student.id), {
