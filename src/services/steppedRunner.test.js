@@ -168,6 +168,7 @@ test("the eq seed stream is independent of the params seed", () => {
 // ─── stepClearsOnRetry ────────────────────────────────────────────────────────
 
 test("clear-on-retry is per step type: select/drag clear, numeric keeps", () => {
+  expect(stepClearsOnRetry("givens")).toBe(true);      // values + unit chips reset
   expect(stepClearsOnRetry("equationSelect")).toBe(true);
   expect(stepClearsOnRetry("rearrange")).toBe(true);   // inherits when built
   expect(stepClearsOnRetry("compute")).toBe(false);

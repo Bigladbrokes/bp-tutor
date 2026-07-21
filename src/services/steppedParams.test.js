@@ -1,5 +1,5 @@
 import {
-  steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer,
+  steppedSeed, generateParams, injectParams, evaluateAnswerExpr, checkAnswer, gradeGivens,
 } from "./steppedParams";
 
 // Fixture mirrors the reference app's "Accelerated Motion Finding Final
@@ -168,4 +168,88 @@ test("full pipeline: seeded params render into text and grade their own answer",
   // A student answering exactly right passes; 5% off at 1% tolerance fails
   expect(checkAnswer(expected, expected, { type: "relative", value: 0.01 })).toBe(true);
   expect(checkAnswer(expected * 1.05, expected, { type: "relative", value: 0.01 })).toBe(false);
+});
+
+// ─── gradeGivens (build step 4) ───────────────────────────────────────────────
+
+const GIVENS_FIELDS = [
+  { symbol: "d",  expectedParam: "d",  expectedUnit: "m"    },
+  { symbol: "vi", expectedParam: "vi", expectedUnit: "m/s"  },
+  { symbol: "a",  expectedParam: "a",  expectedUnit: "m/s²" },
+];
+const GIVENS_PARAMS = { d: 300, vi: 2, a: 1.9 };
+
+const entry = (value, unit) => ({ value, unit });
+// All-correct entries as a base; override per test.
+const correctEntries = () => ({
+  d:  entry("300", "m"),
+  vi: entry("2",   "m/s"),
+  a:  entry("1.9", "m/s²"),
+});
+
+test("gradeGivens: all correct values + units → passed, no error class", () => {
+  const r = gradeGivens(GIVENS_FIELDS, correctEntries(), GIVENS_PARAMS);
+  expect(r.passed).toBe(true);
+  expect(r.errorClass).toBeNull();
+  expect(r.fields.every((f) => f.ok)).toBe(true);
+});
+
+test("gradeGivens: value and unit validate independently per field", () => {
+  const e = correctEntries();
+  e.vi = entry("9", "m/s");     // wrong value, right unit
+  e.a = entry("1.9", "s");      // right value, wrong unit
+  const r = gradeGivens(GIVENS_FIELDS, e, GIVENS_PARAMS);
+  const bym = Object.fromEntries(r.fields.map((f) => [f.symbol, f]));
+  expect(bym.vi.valueOk).toBe(false);
+  expect(bym.vi.unitOk).toBe(true);
+  expect(bym.a.valueOk).toBe(true);
+  expect(bym.a.unitOk).toBe(false);
+  expect(bym.d.ok).toBe(true);
+});
+
+test("gradeGivens: 300 / 300.0 / numeric all match the same param value", () => {
+  for (const v of ["300", "300.0", 300]) {
+    const e = correctEntries();
+    e.d = entry(v, "m");
+    expect(gradeGivens(GIVENS_FIELDS, e, GIVENS_PARAMS).fields.find((f) => f.symbol === "d").valueOk).toBe(true);
+  }
+});
+
+test("gradeGivens: wrongValue is reported before wrongUnit when both exist", () => {
+  const e = correctEntries();
+  e.d = entry("999", "m");      // wrong value
+  e.a = entry("1.9", "s");      // wrong unit (value right)
+  const r = gradeGivens(GIVENS_FIELDS, e, GIVENS_PARAMS);
+  expect(r.passed).toBe(false);
+  expect(r.errorClass).toBe("givens.wrongValue");
+});
+
+test("gradeGivens: right values + one wrong unit → wrongUnit, only that field not-ok", () => {
+  const e = correctEntries();
+  e.a = entry("1.9", "s");      // only the unit is wrong
+  const r = gradeGivens(GIVENS_FIELDS, e, GIVENS_PARAMS);
+  expect(r.errorClass).toBe("givens.wrongUnit");
+  const notOk = r.fields.filter((f) => !f.ok).map((f) => f.symbol);
+  expect(notOk).toEqual(["a"]);
+});
+
+test("gradeGivens: correct fields stay ok on a partial failure", () => {
+  const e = correctEntries();
+  e.vi = entry("9", "m/s");     // only vi is wrong
+  const r = gradeGivens(GIVENS_FIELDS, e, GIVENS_PARAMS);
+  const bym = Object.fromEntries(r.fields.map((f) => [f.symbol, f]));
+  expect(bym.d.ok).toBe(true);
+  expect(bym.a.ok).toBe(true);
+  expect(bym.vi.ok).toBe(false);
+});
+
+test("gradeGivens: empty value or missing unit is not correct", () => {
+  const e = correctEntries();
+  e.d = entry("", "m");         // no value typed
+  e.vi = entry("2", null);      // no unit assigned
+  const r = gradeGivens(GIVENS_FIELDS, e, GIVENS_PARAMS);
+  const bym = Object.fromEntries(r.fields.map((f) => [f.symbol, f]));
+  expect(bym.d.valueOk).toBe(false);
+  expect(bym.vi.unitOk).toBe(false);
+  expect(r.errorClass).toBe("givens.wrongValue"); // empty value counts as wrong value first
 });

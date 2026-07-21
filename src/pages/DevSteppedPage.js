@@ -56,6 +56,25 @@ const EQUATION_STEP = {
   ],
 };
 
+// §3.1 givens step: extract each value + attach its unit. Values are graded
+// against the generated params for the attempt; units against expectedUnit.
+const GIVENS_STEP = {
+  stepType: "givens",
+  title: "กรอกค่าที่โจทย์ให้มา แล้วลากหน่วยให้ถูกต้อง",
+  fields: [
+    { symbol: "d",  expectedParam: "d",  expectedUnit: "m"    },
+    { symbol: "vi", expectedParam: "vi", expectedUnit: "m/s"  },
+    { symbol: "a",  expectedParam: "a",  expectedUnit: "m/s²" },
+  ],
+  unitPalette: ["s", "m", "m/s", "m/s²"],
+  feedback: {
+    "givens.wrongValue":
+      "อ่านโจทย์อีกครั้ง แล้วสังเกตหน่วยที่เขียนติดกับตัวเลข: m คือระยะทาง, m/s คือความเร็ว, s คือเวลา, m/s² คือความเร่ง",
+    "givens.wrongUnit":
+      "หน่วยนี้ไม่ตรงกับปริมาณ ลองดูว่าตัวเลขนี้ในโจทย์บอกปริมาณอะไร",
+  },
+};
+
 // Fixture 1: [compute] only (build step 2).
 const FIXTURE_COMPUTE_ONLY = {
   id: "q_phys_kin_fv_001",
@@ -72,13 +91,23 @@ const FIXTURE_EQ_THEN_COMPUTE = {
   steps: [EQUATION_STEP, COMPUTE_STEP],
 };
 
+// Fixture 3: [givens, equationSelect, compute] — the full observed flow
+// (build step 4).
+const FIXTURE_FULL_FLOW = {
+  id: "q_phys_kin_fv_003",
+  type: "stepped",
+  template: KINEMATICS_TEMPLATE,
+  steps: [GIVENS_STEP, EQUATION_STEP, COMPUTE_STEP],
+};
+
 const FIXTURES = {
   computeOnly: FIXTURE_COMPUTE_ONLY,
   eqThenCompute: FIXTURE_EQ_THEN_COMPUTE,
+  fullFlow: FIXTURE_FULL_FLOW,
 };
 
 // Flip this one line to switch fixtures:
-const ACTIVE_FIXTURE = FIXTURES.eqThenCompute;
+const ACTIVE_FIXTURE = FIXTURES.fullFlow;
 
 export default function DevSteppedPage() {
   return (

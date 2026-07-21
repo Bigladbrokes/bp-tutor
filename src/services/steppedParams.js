@@ -181,3 +181,44 @@ export function checkAnswer(studentValue, expectedValue, tolerance) {
   const epsilon = 1e-9 * Math.max(1, Math.abs(e));
   return Math.abs(s - e) <= tolAbs + epsilon;
 }
+
+// Exact-grid value match for a `givens` field: the student reads a param value
+// off the problem text and types it back, so "300", "300.0" and 300 all match
+// the generated param. The float-safety epsilon matches checkAnswer's; it sits
+// far below any digit a student types, so this stays an exact-value check.
+function givenValueMatches(typed, expected) {
+  if (typed === "" || typed === null || typed === undefined) return false;
+  const v = Number(typed);
+  const e = Number(expected);
+  if (!Number.isFinite(v) || !Number.isFinite(e)) return false;
+  return Math.abs(v - e) <= 1e-9 * Math.max(1, Math.abs(e));
+}
+
+// Per-field grading for a `givens` step (doc §3.1). Value and unit validate
+// INDEPENDENTLY per field. `entries` maps each field's symbol to the student's
+// { value, unit } — value the typed string/number, unit the assigned chip (or
+// null). Values compare only against the generated params for this attempt;
+// nothing client-side is trusted beyond the typed number.
+//
+// Returns:
+//   passed     — every field has BOTH the right value and the right unit
+//   errorClass — "givens.wrongValue" if any value is wrong (the more
+//                fundamental read, so it is reported first); otherwise
+//                "givens.wrongUnit" if any unit is wrong; otherwise null
+//   fields     — per-field { symbol, valueOk, unitOk, ok }, so the UI can
+//                red-X exactly the fields that are not fully correct and
+//                leave the correct ones untouched
+export function gradeGivens(fields, entries, params) {
+  const results = (fields || []).map((f) => {
+    const entry = (entries && entries[f.symbol]) || {};
+    const valueOk = givenValueMatches(entry.value, params?.[f.expectedParam]);
+    const unitOk = entry.unit === f.expectedUnit;
+    return { symbol: f.symbol, valueOk, unitOk, ok: valueOk && unitOk };
+  });
+  const anyWrongValue = results.some((r) => !r.valueOk);
+  const anyWrongUnit = results.some((r) => !r.unitOk);
+  let errorClass = null;
+  if (anyWrongValue) errorClass = "givens.wrongValue";
+  else if (anyWrongUnit) errorClass = "givens.wrongUnit";
+  return { passed: results.every((r) => r.ok), errorClass, fields: results };
+}

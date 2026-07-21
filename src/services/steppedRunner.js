@@ -38,7 +38,7 @@ export function shuffleEquationOptions(options, uid, questionId, attemptNo) {
 // the student's work (a wrong pick left highlighted anchors them to the
 // mistake), while numeric entry keeps the typed value for editing. rearrange
 // (build step 5) inherits the select/drag behavior.
-const CLEAR_ON_RETRY = { equationSelect: true, rearrange: true, compute: false };
+const CLEAR_ON_RETRY = { givens: true, equationSelect: true, rearrange: true, compute: false };
 export const stepClearsOnRetry = (stepType) => CLEAR_ON_RETRY[stepType] ?? false;
 
 // config: { totalSteps, restartPolicy: "strict"|"stepRetry", retriesPerStep }
