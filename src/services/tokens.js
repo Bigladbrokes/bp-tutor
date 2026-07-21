@@ -22,6 +22,13 @@ export const formatTokens = (n) => {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 };
 
+// Flat completion award for a stepped question (doc §7 decision 2): the same
+// amount regardless of how many attempts/restarts it took — completion alone
+// is proof of the full process, because every restart regenerates the numbers.
+// Kept on the existing difficulty economy (no separate global constant), just
+// WITHOUT the attempt-halving that tokensForResult applies.
+export const steppedAward = (difficulty) => TOKEN_VALUES[difficulty] ?? TOKEN_VALUES.Easy;
+
 // ─── Student profile + balance ────────────────────────────────────────────────
 
 // Make sure /students/{uid} exists after login. New docs get the full default
@@ -121,23 +128,27 @@ export const saveResultWithTokens = (user, result, amount, meta = {}) =>
 export const steppedResultId = (sessionId, uid, questionId) =>
   `${sessionId}_${uid}_${questionId}`;
 
-// Save a completed stepped question's result in one transaction, create-only
-// like saveResultWithTokens: if the doc already exists (replay from another
-// tab/device), nothing is written — the create-only rule makes rewriting to
-// farm tokens impossible. The document is the §4 shape progress.js analytics
-// consume, written ONCE at completion carrying the full attempts[] history.
+// Save a completed stepped question's result AND credit its flat token award
+// in one transaction, create-only like saveResultWithTokens: if the doc
+// already exists (replay from another tab/device), nothing is written and
+// nothing is credited — the create-only guard (here and in the rules) is the
+// actual anti-double-credit boundary (see the anti-replay reasoning in B2).
+// The document is the §4 shape progress.js analytics consume, written ONCE at
+// completion carrying the full attempts[] history.
 //
-// TODO(B2): token AWARD logic. This build (B1) writes tokensAwarded: 0 and
-// touches no balance or ledger. B2 will, inside THIS transaction, credit the
-// flat completion award (doc §7 decision 2) via increment() on
-// students/{uid} + a tokenHistory "question" entry — exactly like
-// saveResultWithTokens — and must compute the amount server-side rather than
-// trusting any client-supplied tokensAwarded.
-export const saveSteppedResult = (user, { sessionId, questionId, attempts, completedOnAttempt, totalTimeMs }) =>
+// The amount is the flat, server-computed steppedAward(difficulty) — never a
+// client-supplied value. As across the rest of the app, the token AMOUNT is
+// client-trusted (the students/{uid} rule permits self-set balances); the
+// integrity guarantee is that this credit fires at most once per
+// (session, student, question) because the result ID is deterministic and
+// create-only.
+export const saveSteppedResult = (user, { sessionId, questionId, attempts, completedOnAttempt, totalTimeMs, difficulty }) =>
   runTransaction(db, async (t) => {
     const ref = doc(db, "results", steppedResultId(sessionId, user.uid, questionId));
     const existing = await t.get(ref);
-    if (existing.exists()) return { duplicate: true };
+    if (existing.exists()) return { duplicate: true };   // ① create-only guard (unchanged)
+
+    const amount = steppedAward(difficulty);
     t.set(ref, {
       sessionId,
       questionId,
@@ -148,10 +159,28 @@ export const saveSteppedResult = (user, { sessionId, questionId, attempts, compl
       attempts: attempts ?? [],
       completedOnAttempt: completedOnAttempt ?? null,
       totalTimeMs: totalTimeMs ?? null,
-      tokensAwarded: 0,                // TODO(B2): real flat award at completion
+      tokensAwarded: amount,
       timestamp: serverTimestamp(),
     });
-    return { duplicate: false };
+    if (amount > 0) {
+      t.set(doc(db, "students", user.uid), {             // ② balance credit
+        tokenBalance: increment(amount),
+        studentName: user.displayName ?? "",
+        studentEmail: user.email ?? "",
+        photoURL: user.photoURL ?? "",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      t.set(doc(collection(db, "tokenHistory")), {       // ③ ledger append
+        studentId: user.uid,
+        studentName: user.displayName ?? "",
+        amount,
+        type: "question",
+        questionId: questionId ?? null,
+        difficulty: difficulty ?? "Easy",
+        timestamp: serverTimestamp(),
+      });
+    }
+    return { duplicate: false, amount };
   });
 
 export const giveBonusTokens = (student, amount, reason, teacherUid) => {

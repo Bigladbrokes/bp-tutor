@@ -125,14 +125,20 @@ describe("stepped result — shape enforcement", () => {
     await assertFails(setDoc(doc(db, "results", steppedId(ALICE)), steppedDocFor(ALICE, { attempts: "nope" })));
   });
 
-  test("a stepped create with tokensAwarded != 0 is rejected (B1 token lock)", async () => {
+  // B2 relaxed the B1 tokensAwarded==0 lock to (is number && >= 0) — the same
+  // client-trusted amount model as the rest of the app; create-only is the
+  // real anti-abuse guard. A valid non-negative award now succeeds; a negative
+  // amount is still rejected.
+  test("a stepped create with a valid non-negative tokensAwarded succeeds", async () => {
     const db = asStudent(ALICE);
-    await assertFails(setDoc(doc(db, "results", steppedId(ALICE)), steppedDocFor(ALICE, { tokensAwarded: 5 })));
+    await assertSucceeds(setDoc(doc(db, "results", steppedId(ALICE)), steppedDocFor(ALICE, { tokensAwarded: 5 })));
+    // and zero (the B1 value) still succeeds
+    await assertSucceeds(setDoc(doc(db, "results", steppedId(ALICE, "q2")), steppedDocFor(ALICE, { questionId: "q2", tokensAwarded: 0 })));
   });
 
-  test("a stepped create with tokensAwarded == 0 still succeeds", async () => {
+  test("a stepped create with a negative tokensAwarded is rejected", async () => {
     const db = asStudent(ALICE);
-    await assertSucceeds(setDoc(doc(db, "results", steppedId(ALICE)), steppedDocFor(ALICE, { tokensAwarded: 0 })));
+    await assertFails(setDoc(doc(db, "results", steppedId(ALICE)), steppedDocFor(ALICE, { tokensAwarded: -1 })));
   });
 });
 

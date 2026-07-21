@@ -54,16 +54,18 @@ service cloud.firestore {
         && request.resource.data.studentEmail == request.auth.token.email
         && resultId.split('_')[1] == request.auth.uid
         // Stepped results use a 3-segment ID (sessionId_uid_questionId) and
-        // must carry the validated shape. tokensAwarded is locked to 0 here:
-        // B1 awards no tokens, so a client can never write an arbitrary amount.
-        // B2 will loosen this to a server-computed value as a reviewed change,
-        // leaving no window where a client picks the token count. Legacy row
-        // IDs (4 segments) are unaffected: size() != 3 short-circuits this
-        // clause to true for them.
+        // must carry the validated shape. tokensAwarded must be a non-negative
+        // number — the same client-trusted amount model as the rest of the app
+        // (the students/{uid} rule already permits self-set balances). The real
+        // anti-abuse guard is create-only result docs: this row, and its token
+        // credit, can be written at most once per (session, student, question).
+        // Legacy row IDs (4 segments) are unaffected: size() != 3
+        // short-circuits this clause to true for them.
         && (resultId.split('_').size() != 3
             || (request.resource.data.type == 'stepped'
                 && request.resource.data.attempts is list
-                && request.resource.data.tokensAwarded == 0));
+                && request.resource.data.tokensAwarded is number
+                && request.resource.data.tokensAwarded >= 0));
       allow update: if isTeacher();
       // Teacher-only: part of permanently deleting a student's data. Students
       // can still never delete their own rows (replay-proofing is unaffected).

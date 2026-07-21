@@ -1,4 +1,4 @@
-import { resultRowId, tokensForResult, applyBalanceAdjustment, chunkRefs } from "./tokens";
+import { resultRowId, tokensForResult, steppedAward, applyBalanceAdjustment, chunkRefs } from "./tokens";
 
 const uid = "StuUID123";
 const base = { sessionId: "sessABC", questionId: "qXYZ" };
@@ -37,6 +37,15 @@ test("tokensForResult: full, half, and zero credit", () => {
   expect(tokensForResult("Medium", true, 1)).toBe(5);
   expect(tokensForResult("Medium", true, 2)).toBe(2.5);
   expect(tokensForResult("Hard", false, 2)).toBe(0);
+});
+
+test("steppedAward: flat per-difficulty, no attempt-halving", () => {
+  // Same difficulty economy as tokensForResult, but never scaled by attempts
+  // (doc §7 decision 2 — completion alone earns the flat amount).
+  expect(steppedAward("Easy")).toBe(1);
+  expect(steppedAward("Medium")).toBe(5);
+  expect(steppedAward("Hard")).toBe(10);
+  expect(steppedAward(undefined)).toBe(1); // defaults to Easy
 });
 
 // ─── applyBalanceAdjustment (Task 2: floor guard) ─────────────────────────────
