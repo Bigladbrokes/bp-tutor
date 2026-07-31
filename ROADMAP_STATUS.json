@@ -1,0 +1,83 @@
+{
+  "project": "bp-tutor",
+  "generated_at": "2026-07-31T15:31:22Z",
+  "current_step": 6,
+  "steps": [
+    {
+      "n": 1,
+      "title": "Core quiz platform (auth, sessions, results, tokens)",
+      "detail": "Google-auth role routing, live sessions with QR/join-code, guided + independent question modes, replay-proof token economy via deterministic result IDs and transactional writes.",
+      "status": "done",
+      "evidence": "src/App.js, src/services/tokens.js (saveResultWithTokens), firestore.rules; commits 934793a..2273a49; README.md describes this as production"
+    },
+    {
+      "n": 2,
+      "title": "Teacher Dashboard Phase 1",
+      "detail": "Per-session live stats (finished count, class accuracy, most-missed, per-student table with expandable per-question detail).",
+      "status": "done",
+      "evidence": "src/services/sessionStats.js, src/components/SessionDashboard.js; commits 245705e, ba5688c, ef55649, 6429329, efb5610 (2026-07-15/16). Note: PROJECT_STATUS.md (2026-07-15 snapshot) still says 'implementation NOT started' — stale, contradicted by later commits and by BP-Tutor_STATUS.md which lists it as a completed 'Prior Milestone'"
+    },
+    {
+      "n": 3,
+      "title": "Motivation layer, chapters, math keypad, MC shuffle",
+      "detail": "Streaks, per-chapter understanding %, deterministic per-student MC option shuffle, chapter autocomplete, shared LaTeX-aware math-answer normalizer + keypad.",
+      "status": "done",
+      "evidence": "src/services/progress.js, src/services/chapters.js, src/services/shuffle.js, src/services/mathAnswer.js; passing tests in src/services/*.test.js; commits 2273a49, b8c9d4a, f375c48, 1de0575"
+    },
+    {
+      "n": 4,
+      "title": "Stepped Solver engine (steps 1–5): params, reducer, per-step UI",
+      "detail": "Pure template param generator, steppedReducer state machine, equationSelect/givens/rearrange step UIs with independent grading.",
+      "status": "done",
+      "evidence": "src/services/steppedParams.js, steppedRunner.js, src/components/SteppedQuestionRunner.js; tests steppedParams.test.js, steppedRunner.test.js, SteppedQuestionRunner.test.js all pass (verified via `npx react-scripts test`, 195/195 total); commits 4afa8d2..afa9ad9"
+    },
+    {
+      "n": 5,
+      "title": "Stepped Solver step 6: analytics + save path + Firestore rules",
+      "detail": "Error-class analytics in progress.js, saveSteppedResult() atomic write+token-award transaction, deterministic 3-segment stepped result IDs, matching firestore.rules with anti-replay/shape enforcement, flat per-difficulty award.",
+      "status": "done",
+      "evidence": "src/services/tokens.js:128-160 (steppedResultId, saveSteppedResult); firestore.rules line 65 (type=='stepped' branch); firestore-tests/rules.test.mjs + writepath.test.mjs — verified via `npm run test:rules` against the Firestore emulator: 22/22 pass, 0 fail; commits cb450cf, 8dc5cf1, ff66523 (2026-07-21)"
+    },
+    {
+      "n": 6,
+      "title": "Wire saveSteppedResult + SteppedQuestionRunner into the real student session flow",
+      "detail": "Currently the stepped solver only exists behind a dev-only route (/dev/stepped, gated on NODE_ENV==='development' and dead-code-eliminated from production builds per src/App.js:93-98). StudentPage.js never imports SteppedQuestionRunner, and no production code path calls saveSteppedResult — grepped and confirmed only reference is its own definition in tokens.js.",
+      "status": "current",
+      "evidence": "src/App.js:93-98 (dev-only guard + comment); grep for SteppedQuestionRunner in src/pages/StudentPage.js returns no match; grep for saveSteppedResult in src/ returns only its definition site; BP-Tutor_STATUS.md explicitly states '✅ Implemented and tested / ❌ Not yet wired to a production caller' and lists this as Next Step #1"
+    },
+    {
+      "n": 7,
+      "title": "Confirm stepped-solver Firestore rules are deployed to production",
+      "detail": "The stepped-result rule branch (firestore.rules line 65) was committed 2026-07-21 (8dc5cf1), well after the last confirmed-deployed rules snapshot on record (2026-07-10, commit f4e9ca3). Emulator tests pass, but that only proves the rules file is internally correct — not that `firebase deploy --only firestore:rules` has been run since. This must be verified/deployed before step 6 goes live, or students could hit permission-denied on save.",
+      "status": "todo",
+      "evidence": "No deploy log, release-ruleset check, or commit evidence in-repo confirms a post-2026-07-21 rules deploy; memory note project_bp-tutor-firebase.md records only the 2026-07-10 deploy as confirmed"
+    },
+    {
+      "n": 8,
+      "title": "Session integration: connect stepped flow to overall session/results state",
+      "detail": "Beyond just calling saveSteppedResult, the stepped question type needs to participate in session progress tracking, sessionStats.js (most-missed, per-student rows), and the teacher Live Results view the same way MC/FitB/free-form questions do today.",
+      "status": "todo",
+      "evidence": "BP-Tutor_STATUS.md 'Next Steps' #2; no stepped-aware branches found in src/services/sessionStats.js or src/components/LiveResults.js on inspection of saveSteppedResult call sites"
+    },
+    {
+      "n": 9,
+      "title": "Authoring surface for stepped-solver question templates",
+      "detail": "v1 ships with exactly one hardcoded kinematics template (per BP-Tutor_STATUS.md 'Key Product Decisions'); teachers need a way to add new templates without code changes before this feature is usable beyond a single problem type.",
+      "status": "todo",
+      "evidence": "BP-Tutor_STATUS.md 'Next Steps' #3 and 'Key Product Decisions Already Made'; only one template found in src/services/steppedParams.js"
+    },
+    {
+      "n": 10,
+      "title": "Pen-drawing tool on Edit Drawing (teacher authoring)",
+      "detail": "Full pen/eraser/ink feature spec exists (bp-tutor-pen-drawing-spec.md) but implementation has not started: the spec's own Step 0 is an audit that must run first, and no src/features/drawing/ directory or any of its named exports (drawingCodec.js, useInkCanvas.js, drawingReducer.js) exist yet.",
+      "status": "todo",
+      "evidence": "bp-tutor-pen-drawing-spec.md (untracked file, not yet committed); glob for src/features/drawing/** returns no files; spec explicitly says 'complete Step 0 and report back before writing any feature code'"
+    }
+  ],
+  "contradictions": [
+    "PROJECT_STATUS.md (dated 2026-07-15, 'written at commit 2273a49') states Teacher Dashboard Phase 1 audit is done but 'implementation NOT started' and is 'BLOCKED ON: user confirmation of 3 definitions.' This is contradicted by later commits in the same repo (245705e 'feat: implement Teacher Dashboard Phase 1', plus ba5688c/ef55649/6429329/efb5610 building on it, all dated 2026-07-15/16) and by BP-Tutor_STATUS.md (dated 2026-07-25), which lists the Teacher Dashboard as a completed 'Prior Milestone (context)' that was 'reviewed and verified.' PROJECT_STATUS.md is a stale point-in-time handover doc, not current state.",
+    "PROJECT_STATUS.md's test count ('49/49 tests passing') is stale; the current suite (verified by running `npx react-scripts test --watchAll=false`) has 195 passing tests across 14 suites, plus a separate 22-test Firestore rules suite (`npm run test:rules`) not mentioned in PROJECT_STATUS.md at all (it predates the stepped-solver rules harness).",
+    "README.md's Data model / Key services tables do not mention the 'stepped' result type or steps 4-6 of the stepped solver at all (no saveSteppedResult, no stepped result ID shape, no DevSteppedPage) — README appears to not have been updated since before the stepped-solver work started (last README commit 9203653, 2026-07-17, precedes steps 1-6 which run 2026-07-20/21). Not a factual contradiction, but a currency gap worth flagging since it's a primary onboarding doc.",
+    "No committed doc besides BP-Tutor_STATUS.md addresses whether the 2026-07-21 stepped-result firestore.rules changes have actually been deployed to production (see roadmap step 7) — this is a gap/open question rather than a stated contradiction, but the working agreement documented in PROJECT_STATUS.md ('never deploy without explicit user confirmation') and BP-Tutor_STATUS.md's own 'Not yet wired to a production caller' suggest the feature is deliberately incomplete/undeployed, not an oversight."
+  ]
+}
