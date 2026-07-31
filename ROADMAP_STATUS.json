@@ -1,6 +1,6 @@
 {
   "project": "bp-tutor",
-  "generated_at": "2026-07-31T15:31:22Z",
+  "generated_at": "2026-07-31T16:13:24Z",
   "current_step": 6,
   "steps": [
     {
@@ -15,7 +15,7 @@
       "title": "Teacher Dashboard Phase 1",
       "detail": "Per-session live stats (finished count, class accuracy, most-missed, per-student table with expandable per-question detail).",
       "status": "done",
-      "evidence": "src/services/sessionStats.js, src/components/SessionDashboard.js; commits 245705e, ba5688c, ef55649, 6429329, efb5610 (2026-07-15/16). Note: PROJECT_STATUS.md (2026-07-15 snapshot) still says 'implementation NOT started' — stale, contradicted by later commits and by BP-Tutor_STATUS.md which lists it as a completed 'Prior Milestone'"
+      "evidence": "src/services/sessionStats.js, src/components/SessionDashboard.js; commits 245705e, ba5688c, ef55649, 6429329, efb5610 (2026-07-15/16). PROJECT_STATUS.md's stale 'implementation NOT started' claim was corrected on this branch in commit e7bb6e8 (superseded-snapshot banner + inline update); BP-Tutor_STATUS.md has always listed it as a completed 'Prior Milestone'"
     },
     {
       "n": 3,
@@ -75,9 +75,11 @@
     }
   ],
   "contradictions": [
-    "PROJECT_STATUS.md (dated 2026-07-15, 'written at commit 2273a49') states Teacher Dashboard Phase 1 audit is done but 'implementation NOT started' and is 'BLOCKED ON: user confirmation of 3 definitions.' This is contradicted by later commits in the same repo (245705e 'feat: implement Teacher Dashboard Phase 1', plus ba5688c/ef55649/6429329/efb5610 building on it, all dated 2026-07-15/16) and by BP-Tutor_STATUS.md (dated 2026-07-25), which lists the Teacher Dashboard as a completed 'Prior Milestone (context)' that was 'reviewed and verified.' PROJECT_STATUS.md is a stale point-in-time handover doc, not current state.",
-    "PROJECT_STATUS.md's test count ('49/49 tests passing') is stale; the current suite (verified by running `npx react-scripts test --watchAll=false`) has 195 passing tests across 14 suites, plus a separate 22-test Firestore rules suite (`npm run test:rules`) not mentioned in PROJECT_STATUS.md at all (it predates the stepped-solver rules harness).",
-    "README.md's Data model / Key services tables do not mention the 'stepped' result type or steps 4-6 of the stepped solver at all (no saveSteppedResult, no stepped result ID shape, no DevSteppedPage) — README appears to not have been updated since before the stepped-solver work started (last README commit 9203653, 2026-07-17, precedes steps 1-6 which run 2026-07-20/21). Not a factual contradiction, but a currency gap worth flagging since it's a primary onboarding doc.",
-    "No committed doc besides BP-Tutor_STATUS.md addresses whether the 2026-07-21 stepped-result firestore.rules changes have actually been deployed to production (see roadmap step 7) — this is a gap/open question rather than a stated contradiction, but the working agreement documented in PROJECT_STATUS.md ('never deploy without explicit user confirmation') and BP-Tutor_STATUS.md's own 'Not yet wired to a production caller' suggest the feature is deliberately incomplete/undeployed, not an oversight."
+    "RESOLVED (as of commit e7bb6e8, this branch only): PROJECT_STATUS.md previously stated Teacher Dashboard Phase 1 was 'implementation NOT started' and 'BLOCKED ON: user confirmation,' contradicting commits 245705e/ba5688c/ef55649/6429329/efb5610 and BP-Tutor_STATUS.md's 'Prior Milestone' entry. The doc now carries a superseded-snapshot banner and inline corrections pointing to BP-Tutor_STATUS.md as current state. Original claim left in place as historical record, not deleted.",
+    "RESOLVED (as of commit e7bb6e8, this branch only): PROJECT_STATUS.md's '49/49 tests passing' claim is now annotated inline with the current count (195 tests / 14 suites via `npm test`) and the previously-unmentioned 22-test Firestore rules suite (`npm run test:rules`).",
+    "RESOLVED (as of commit e7bb6e8, this branch only): README.md's Data model / Key services tables now document steppedParams.js, steppedRunner.js, saveSteppedResult, the stepped result's 3-segment doc ID shape, and a dedicated 'Stepped Solver (in progress)' section noting its dev-only /dev/stepped status.",
+    "NEW: the three fixes above exist only on branch `claude/roadmap-audit-status` (commits e8ddb65, e7bb6e8), not yet merged to `main` — see open PR #3 (github.com/Bigladbrokes/bp-tutor/pull/3). Anyone reading PROJECT_STATUS.md/README.md on `main` right now still sees the stale, contradictory versions. This roadmap file itself is also only committed on this branch, not main.",
+    "PROJECT_STATUS.md is listed in .gitignore (`.gitignore:20`) yet was force-added and committed anyway (e7bb6e8) so its corrections would be versioned — worth confirming with the user whether that gitignore entry itself is intentional or stale, since a gitignored-but-tracked file is an unusual combination.",
+    "Still open (not a doc contradiction, a genuine unresolved question): no committed doc or repo evidence confirms whether the 2026-07-21 stepped-result firestore.rules changes (commit 8dc5cf1) have been deployed to production since the last confirmed deploy on 2026-07-10 — see roadmap step 7."
   ]
 }
