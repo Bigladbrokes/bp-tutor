@@ -26,7 +26,9 @@ A classroom "exit ticket" quiz app for math and science tutoring, built with Rea
 | `sessionStats.js` | Live per-student session stats for the teacher dashboard, including the "stuck" (gone-quiet) flag |
 | `mathAnswer.js` | Normalizes typed/keypad math answers to a canonical string so equivalent forms (sqrt, fractions, exponents) compare equal; numeric-tolerance fallback runs separately |
 | `shuffle.js` | Deterministic per-student MC option shuffling — order is a pure function of (studentUid, questionId), so neighbors see different orders but each student's order is stable |
-| `tokens.js` | Token economy: earn values by difficulty, append-only ledger, transactional redemption approval that re-checks balance and stock |
+| `tokens.js` | Token economy: earn values by difficulty, append-only ledger, transactional redemption approval that re-checks balance and stock; also owns the stepped-solver save path (`saveSteppedResult`, `steppedResultId`) |
+| `steppedParams.js` | Pure parameter generator for stepped-solver problem templates (v1 ships one kinematics template) |
+| `steppedRunner.js` | `steppedReducer` state machine driving the multi-step solver flow (equation select → givens → rearrange → compute) |
 
 ## Getting started
 
@@ -76,7 +78,7 @@ Session questions — including correct answers and hints — are downloaded to 
 |-------------|------------|----------|
 | `questions` | teacher    | text, type (`mc` / `fill_in_blank` / `sa`), options/blanks/steps, hint, image URL, grade/subject/difficulty |
 | `sessions`  | teacher    | `questionIds`, `isActive`, timestamps |
-| `results`   | students   | one row per resolved question/blank/step: mode, correctness, attempts, hint usage, the student's answer, `tokensEarned`. Doc IDs are deterministic (`session_student_question_row`) and rows are create-only, so replaying a session never re-credits tokens |
+| `results`   | students   | one row per resolved question/blank/step: mode, correctness, attempts, hint usage, the student's answer, `tokensEarned`. Doc IDs are deterministic (`session_student_question_row`) and rows are create-only, so replaying a session never re-credits tokens. Stepped-solver completions use a separate 3-segment doc ID shape (`session_student_question`, `type: "stepped"`) written by `saveSteppedResult` — see [Stepped Solver](#stepped-solver-in-progress) below |
 | `students`  | students + teacher | `studentName`, `studentEmail`, `photoURL`, `role` (`teacher` / `student`), `tokenBalance` (running total), `createdAt` |
 | `tokenHistory` | students + teacher | append-only ledger: `type` (`question` / `bonus` / `redemption`), signed `amount`, metadata |
 | `rewards`   | teacher    | reward catalog: name, image, `tokenCost`, optional `stock` (null = unlimited) |
@@ -87,3 +89,13 @@ Session questions — including correct answers and hints — are downloaded to 
 Correct answers earn tokens by question difficulty — Easy 1, Medium 5, Hard 10 — halved when the second attempt was needed, per result row (each MC question, fill-in blank, or solution step). Tokens are deducted **only when the teacher approves** a redemption request (approval runs in a transaction that re-checks balance and stock), so rejections need no refunds.
 
 Older question documents may use `type` only (newer ones also carry `questionType`) and numeric grades `7/8/9`; the app reads both forms, and the teacher dashboard offers a one-click grade-label migration when old labels are detected.
+
+## Stepped Solver (in progress)
+
+A step-validated problem-solving flow (equation select → givens → rearrange → compute), built as an alternative to the free-form Independent Mode step answer. It is implemented and tested end-to-end but **not yet reachable by real students** — see [`BP-Tutor_STATUS.md`](BP-Tutor_STATUS.md) for current status and next steps.
+
+- **UI**: `src/components/SteppedQuestionRunner.js`, driven by the `steppedReducer` state machine in `src/services/steppedRunner.js`. Only mounted via the dev-only route `/dev/stepped` (`src/pages/DevSteppedPage.js`), gated on `NODE_ENV === "development"` and dead-code-eliminated from production builds — `StudentPage.js` does not render it.
+- **Params**: `src/services/steppedParams.js` — pure per-template parameter generator (v1 ships one kinematics template).
+- **Analytics**: `src/services/progress.js` — pure error-class analytics for stepped attempts.
+- **Save path**: `saveSteppedResult` / `steppedResultId` in `src/services/tokens.js` — an atomic transaction that writes the result row and awards a flat per-difficulty token amount on completion, replay-proof like the rest of the token system. Not yet called from any production code path.
+- **Data model**: stepped results use a 3-segment deterministic doc ID (`{sessionId}_{studentUid}_{questionId}`, vs. the usual 4-segment `..._{row}` shape) with `type: "stepped"`, an `attempts[]` list, and `tokensAwarded`. Enforced by a dedicated branch in `firestore.rules` (ownership, create-only anti-replay, shape validation) — see `firestore-tests/rules.test.mjs` and `firestore-tests/writepath.test.mjs`, run via `npm run test:rules`.
